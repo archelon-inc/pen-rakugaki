@@ -197,5 +197,21 @@ await sleep(2000);
 check("共有の後は URL に印が残らない", (await evaluate("location.search")) === "");
 check("共有で届いた画像が線なしで出る", (await shot("10-shared")).equals(loaded));
 
+// 共有メニューから画像のリンク（文）が届いたら、その画像を取ってきて開く
+async function shareText(text) {
+  await evaluate(`(() => {
+    const form = Object.assign(document.createElement("form"), { method: "POST", action: "share", enctype: "multipart/form-data" });
+    form.append(Object.assign(document.createElement("input"), { type: "hidden", name: "text", value: ${JSON.stringify(text)} }));
+    document.body.append(form);
+    form.submit();
+    return true;
+  })()`);
+  await sleep(2000);
+}
+await shareText(`見て ${new URL("test/sample.png", APP).href}`);
+check("共有でリンクが届いたら、その画像が出る", (await shot("11-shared-link")).equals(loaded));
+await shareText("画像の無い文");
+check("画像を取り出せない共有には、そう伝える", (await evaluate("document.querySelector('#hint').textContent")).includes("取り出せませんでした"));
+
 chrome.kill();
 process.exit(failures ? 1 : 0);

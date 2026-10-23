@@ -292,8 +292,13 @@ async function loadImage(blob) {
 }
 
 async function takeShared() {
-  if (location.search !== "?shared") return;
+  const result = location.search;
+  if (result !== "?shared" && result !== "?share-failed") return;
   history.replaceState(null, "", location.pathname);
+  if (result === "?share-failed") {
+    $("hint").textContent = "共有されたものから画像を取り出せませんでした";
+    return;
+  }
   const cache = await caches.open("rakugaki-shared");
   const response = await cache.match("shared");
   if (!response) return;

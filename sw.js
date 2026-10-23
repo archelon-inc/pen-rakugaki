@@ -41,10 +41,28 @@ self.addEventListener("fetch", (event) => {
 async function receiveShare(request) {
   const form = await request.formData();
   const file = form.get("image");
+  const image = file instanceof File && file.size > 0 ? file : await fetchLinkedImage(form);
   const home = new URL("./", self.registration.scope);
-  if (!(file instanceof File)) return Response.redirect(home.href, 303);
+  if (!image) {
+    home.search = "share-failed";
+    return Response.redirect(home.href, 303);
+  }
   const cache = await caches.open(SHARED);
-  await cache.put("shared", new Response(file, { headers: { "Content-Type": file.type } }));
+  await cache.put("shared", new Response(image, { headers: { "Content-Type": image.type } }));
   home.search = "shared";
   return Response.redirect(home.href, 303);
+}
+
+// Discord などは画像のファイルでなくリンクを渡すので、共有された文の最初のリンクから画像を取ってくる
+async function fetchLinkedImage(form) {
+  const words = ["url", "text", "title"].map((name) => form.get(name) || "").join(" ");
+  const link = words.match(/https?:\/\/\S+/)?.[0];
+  if (!link) return null;
+  try {
+    const response = await fetch(link);
+    const blob = await response.blob();
+    return response.ok && blob.type.startsWith("image/") ? blob : null;
+  } catch {
+    return null;
+  }
 }
