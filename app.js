@@ -392,6 +392,26 @@ function updateButtons() {
   $("share").disabled = !image;
 }
 
+// ---- インストール：まだ入れていないブラウザでだけ、最初の画面に大きなボタンを出す
+
+let installPrompt = null;
+addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  installPrompt = e;
+  $("install").hidden = false;
+});
+addEventListener("appinstalled", () => {
+  installPrompt = null;
+  $("install").hidden = true;
+});
+$("install").addEventListener("click", async () => {
+  if (!installPrompt) return;
+  installPrompt.prompt();
+  await installPrompt.userChoice;
+  installPrompt = null;
+  $("install").hidden = true;
+});
+
 $("open").addEventListener("click", () => $("file").click());
 $("file").addEventListener("change", () => {
   const file = $("file").files[0];

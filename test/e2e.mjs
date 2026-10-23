@@ -120,6 +120,7 @@ await sleep(1500);
 check("service worker が動く", await evaluate("navigator.serviceWorker.ready.then(() => true)"));
 check("manifest に誤りが無い", (await page("Page.getAppManifest")).errors.length === 0);
 check("インストールできる", (await page("Page.getInstallabilityErrors")).installabilityErrors.length === 0);
+check("まだ入れていなければインストールのボタンが出る", await evaluate("!document.querySelector('#install').hidden"));
 const empty = await shot("01-empty");
 
 // 画像を選ぶと出る
