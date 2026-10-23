@@ -179,10 +179,56 @@ check("消しゴムでなぞった線が消える", !erased.equals(marked));
 await tap("#undo");
 check("元に戻すと消した線が戻る", (await shot("09-undo")).equals(marked));
 
+// アプリが落ちても閉じても、開き直せば書いたものが残っている
+await sleep(1500);
+await page("Page.reload");
+await sleep(1500);
+check("開き直すと、書いたものがそのまま出る", (await shot("10-reopened")).equals(marked));
+
 // 送る（共有の無い環境では画像を書き出す）
 await tap("#share");
 await sleep(1500);
 check("送ると書き込んだ画像が出る", readdirSync(OUT_DIR).some((f) => /^rakugaki-.*\.jpg$/.test(f)));
+
+// たくさん書いても、書いている間の1コマが重くならない（重くなり続けると、たくさん書いたあとにアプリが落ちる）。
+// CDP で1点ずつ送ると千本の線に時間がかかるので、ペンの入力をページの中で送る
+const PEN = `const board = document.querySelector("#board");
+  const pen = (type, x, y) => board.dispatchEvent(new PointerEvent(type, {
+    pointerId: 1, pointerType: "pen", isPrimary: true, clientX: x, clientY: y, pressure: 0.5, buttons: type === "pointerup" ? 0 : 1, bubbles: true }));`;
+// 書いている間の1コマに描くのにかかる時間（中央値）
+const frameCost = () => evaluate(`(async () => {
+  ${PEN}
+  const frame = () => new Promise((r) => requestAnimationFrame((t) => r(performance.now() - t)));
+  const costs = [];
+  pen("pointerdown", 100, 600);
+  for (let i = 1; i <= 9; i++) {
+    pen("pointermove", 100 + i * 20, 600 + i * 5);
+    costs.push(await frame());
+  }
+  pen("pointerup", 280, 645);
+  return costs.sort((a, b) => a - b)[4];
+})()`);
+await chooseFile("#file", IMAGE);
+await sleep(800);
+await tap("#pen");
+await tap('[data-tool="pen"]');
+await fingers([[200, 150]], [[200, 150]], 0);
+const light = await frameCost();
+const fewLines = await shot("11-before-many");
+await evaluate(`(() => {
+  ${PEN}
+  for (let k = 0; k < 1000; k++) {
+    const x = 40 + ((k * 37) % 330);
+    const y = 120 + ((k * 53) % 600);
+    pen("pointerdown", x, y);
+    for (let i = 1; i <= 100; i++) pen("pointermove", x + i * 0.4, y + 8 * Math.sin(i / 6));
+    pen("pointerup", x + 40, y);
+  }
+  return true;
+})()`);
+check("ペンで千本の線を書ける", !(await shot("12-many")).equals(fewLines));
+const heavy = await frameCost();
+check(`千本書いても、書いている間の1コマが重くならない（${light.toFixed(1)} ms → ${heavy.toFixed(1)} ms）`, heavy < light + 50);
 
 // 共有メニューから届いた画像を開く
 await evaluate(`(() => {
@@ -195,7 +241,7 @@ await chooseFile("#shared-input", IMAGE);
 await evaluate("document.querySelector('#shared-input').form.submit(), true");
 await sleep(2000);
 check("共有の後は URL に印が残らない", (await evaluate("location.search")) === "");
-check("共有で届いた画像が線なしで出る", (await shot("10-shared")).equals(loaded));
+check("共有で届いた画像が線なしで出る", (await shot("13-shared")).equals(loaded));
 
 // 共有メニューから画像のリンク（文）が届いたら、その画像を取ってきて開く
 async function shareText(text) {
@@ -209,7 +255,7 @@ async function shareText(text) {
   await sleep(2000);
 }
 await shareText(`見て ${new URL("test/sample.png", APP).href}`);
-check("共有でリンクが届いたら、その画像が出る", (await shot("11-shared-link")).equals(loaded));
+check("共有でリンクが届いたら、その画像が出る", (await shot("14-shared-link")).equals(loaded));
 await shareText("画像の無い文");
 check("画像を取り出せない共有には、そう伝える", (await evaluate("document.querySelector('#hint').textContent")).includes("取り出せませんでした"));
 

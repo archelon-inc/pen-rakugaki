@@ -21,6 +21,28 @@ let actions = [];
 
 // ---- 描画
 
+// 書き終えた線は、画像に重ねる透明な層 ink へ焼いておき、1コマごとには画像・ink・書いている線だけを描く。
+// 毎コマ全部の線を描き直すと、書くほど1コマが重くなり、たくさん書いたあとにアプリが落ちる。
+// ink は画面に見せるための写しで、送る画像は線から描き直すので、大きな写真では画素を減らしてメモリを抑える。
+const INK_MAX_PIXELS = 12e6;
+const ink = document.createElement("canvas");
+const inkCtx = ink.getContext("2d");
+let inkStale = false;
+
+function resetInk() {
+  const k = Math.min(1, Math.sqrt(INK_MAX_PIXELS / (image.width * image.height)));
+  ink.width = Math.max(1, Math.round(image.width * k));
+  ink.height = Math.max(1, Math.round(image.height * k));
+  inkCtx.setTransform(ink.width / image.width, 0, 0, ink.height / image.height, 0, 0);
+  inkStale = true;
+}
+
+function bakeInk() {
+  inkCtx.clearRect(0, 0, image.width, image.height);
+  for (const stroke of strokes) drawStroke(inkCtx, stroke);
+  inkStale = false;
+}
+
 let pending = false;
 function render() {
   if (pending) return;
@@ -32,10 +54,12 @@ function render() {
     ctx.fillStyle = BACKGROUND;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     if (!image) return;
+    if (inkStale) bakeInk();
     ctx.setTransform(dpr * view.scale, 0, 0, dpr * view.scale, dpr * view.x, dpr * view.y);
     ctx.imageSmoothingQuality = "high";
     ctx.drawImage(image, 0, 0);
-    for (const stroke of strokes) drawStroke(ctx, stroke);
+    ctx.drawImage(ink, 0, 0, image.width, image.height);
+    if (drawing?.stroke) drawStroke(ctx, drawing.stroke);
   });
 }
 
@@ -164,9 +188,23 @@ function distanceToSegment(p, a, b) {
   return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
 }
 
+function boxOf(points) {
+  const box = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+  for (const p of points) {
+    box.x0 = Math.min(box.x0, p.x);
+    box.y0 = Math.min(box.y0, p.y);
+    box.x1 = Math.max(box.x1, p.x);
+    box.y1 = Math.max(box.y1, p.y);
+  }
+  return box;
+}
+
 function touches(stroke, p, radius) {
   const pts = stroke.points;
   const reach = radius + stroke.width / 2;
+  // 囲む四角の外なら、点を1つずつ調べずに済ませる（線が増えても消しゴムが重くならないように）
+  const b = stroke.box;
+  if (p.x < b.x0 - reach || p.x > b.x1 + reach || p.y < b.y0 - reach || p.y > b.y1 + reach) return false;
   if (pts.length === 1) return Math.hypot(p.x - pts[0].x, p.y - pts[0].y) <= reach;
   for (let i = 1; i < pts.length; i++) {
     if (distanceToSegment(p, pts[i - 1], pts[i]) <= reach) return true;
@@ -180,6 +218,7 @@ function eraseAt(p, removed) {
     if (touches(strokes[i], p, radius)) {
       removed.push({ stroke: strokes[i], index: i });
       strokes.splice(i, 1);
+      inkStale = true;
     }
   }
 }
@@ -202,7 +241,9 @@ function undo() {
   if (!last) return;
   if (last.type === "add") strokes.splice(strokes.lastIndexOf(last.stroke), 1);
   else for (const { stroke, index } of [...last.removed].reverse()) strokes.splice(index, 0, stroke);
+  inkStale = true;
   render();
+  changed();
   updateButtons();
 }
 
@@ -222,7 +263,6 @@ canvas.addEventListener("pointerdown", (e) => {
       eraseAt(drawing.last, drawing.removed);
     } else {
       const stroke = { tool, color: settings.color, width: strokeWidth(tool), points: [toImage(e)] };
-      strokes.push(stroke);
       drawing = { id: e.pointerId, stroke };
     }
     render();
@@ -257,9 +297,18 @@ canvas.addEventListener("pointermove", (e) => {
 
 function release(e) {
   if (drawing && e.pointerId === drawing.id) {
-    if (drawing.stroke) actions.push({ type: "add", stroke: drawing.stroke });
-    else if (drawing.removed.length) actions.push({ type: "erase", removed: drawing.removed });
+    const { stroke, removed } = drawing;
     drawing = null;
+    if (stroke) {
+      stroke.box = boxOf(stroke.points);
+      strokes.push(stroke);
+      drawStroke(inkCtx, stroke);
+      actions.push({ type: "add", stroke });
+    } else if (removed.length) {
+      actions.push({ type: "erase", removed });
+    }
+    render();
+    changed();
     updateButtons();
     return;
   }
@@ -275,35 +324,115 @@ canvas.addEventListener("wheel", (e) => {
   zoomAt(e.clientX, e.clientY, view.scale * Math.exp(-e.deltaY * 0.002));
 }, { passive: false });
 
+// ---- 書きかけを端末に残す：アプリが落ちても閉じても、開き直せば続きから書ける
+
+const SAVE_DELAY_MS = 1000;
+let database = null;
+let saveTimer = 0;
+
+function transact(mode, use) {
+  database ??= new Promise((resolve, reject) => {
+    const open = indexedDB.open("rakugaki", 1);
+    open.onupgradeneeded = () => open.result.createObjectStore("work");
+    open.onsuccess = () => resolve(open.result);
+    open.onerror = () => reject(open.error);
+  });
+  return database.then((db) => new Promise((resolve, reject) => {
+    const tx = db.transaction("work", mode);
+    const result = use(tx.objectStore("work"));
+    tx.oncomplete = () => resolve(result);
+    tx.onerror = tx.onabort = () => reject(tx.error);
+  }));
+}
+
+// 点を1つずつの物にせず x・y・筆圧の数の並びにして残す。点が多くても速く書き出せるように
+function pack(stroke) {
+  const flat = new Float64Array(stroke.points.length * 3);
+  stroke.points.forEach((p, i) => {
+    flat[i * 3] = p.x;
+    flat[i * 3 + 1] = p.y;
+    flat[i * 3 + 2] = p.p;
+  });
+  return { tool: stroke.tool, color: stroke.color, width: stroke.width, points: flat };
+}
+
+function unpack(saved) {
+  const points = [];
+  for (let i = 0; i < saved.points.length; i += 3) points.push({ x: saved.points[i], y: saved.points[i + 1], p: saved.points[i + 2] });
+  return { tool: saved.tool, color: saved.color, width: saved.width, points, box: boxOf(points) };
+}
+
+function changed() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveStrokes, SAVE_DELAY_MS);
+}
+
+function saveStrokes() {
+  if (!saveTimer) return;
+  clearTimeout(saveTimer);
+  saveTimer = 0;
+  const saved = strokes.map(pack);
+  transact("readwrite", (store) => store.put(saved, "strokes")).catch(() => {
+    // 残せない端末でも、開いている間は書ける
+  });
+}
+
+// 裏へ回ったアプリは、端末に閉じられることがある
+addEventListener("visibilitychange", () => document.hidden && saveStrokes());
+
+async function restore() {
+  try {
+    const [kept, saved] = await transact("readonly", (store) => [store.get("image"), store.get("strokes")]);
+    if (kept.result) await showWork(kept.result, (saved.result || []).map(unpack));
+  } catch {
+    // 残したものを読めなければ、まっさらから始める
+  }
+}
+
 // ---- 画像の出し入れ
 
-async function loadImage(blob) {
-  try {
-    image = await createImageBitmap(blob);
-  } catch {
-    alert("画像として読めませんでした");
-    return;
-  }
-  strokes = [];
-  actions = [];
+async function showWork(blob, saved) {
+  image = await createImageBitmap(blob);
+  strokes = saved;
+  actions = saved.map((stroke) => ({ type: "add", stroke }));
+  resetInk();
   $("empty").hidden = true;
   fit();
   updateButtons();
 }
 
+async function loadImage(blob) {
+  try {
+    await showWork(blob, []);
+  } catch {
+    alert("画像として読めませんでした");
+    return;
+  }
+  clearTimeout(saveTimer);
+  saveTimer = 0;
+  transact("readwrite", (store) => {
+    store.put(blob, "image");
+    store.put([], "strokes");
+  }).catch(() => {
+    // 残せない端末でも、開いている間は書ける
+  });
+}
+
+// 共有で開いたなら、その結果を出したかを返す
 async function takeShared() {
   const result = location.search;
-  if (result !== "?shared" && result !== "?share-failed") return;
+  if (result !== "?shared" && result !== "?share-failed") return false;
   history.replaceState(null, "", location.pathname);
   if (result === "?share-failed") {
     $("hint").textContent = "共有されたものから画像を取り出せませんでした";
-    return;
+    return true;
   }
   const cache = await caches.open("rakugaki-shared");
   const response = await cache.match("shared");
-  if (!response) return;
+  if (!response) return false;
   await cache.delete("shared");
   await loadImage(await response.blob());
+  return true;
 }
 
 function stamp() {
@@ -441,4 +570,5 @@ loadSettings();
 syncSettings();
 resize();
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js");
-takeShared();
+// ブラウザでは紹介だけを出すので、書きかけは入れたアプリで開いたときに出す
+if (!document.body.classList.contains("install-only")) takeShared().then((shown) => shown || restore());
