@@ -287,6 +287,7 @@ async function loadImage(blob) {
   strokes = [];
   actions = [];
   $("empty").hidden = true;
+  updateMode();
   fit();
   updateButtons();
 }
@@ -392,24 +393,27 @@ function updateButtons() {
   $("share").disabled = !image;
 }
 
-// ---- インストール：まだ入れていないブラウザでだけ、最初の画面に大きなボタンを出す
+// ---- インストール：まだ入れていないブラウザで開いたら、入れるボタンだけを出す
+// 入れられないブラウザ（iPhone など）や、断られた後は、ブラウザのまま使えるよう普段の画面にする
 
 let installPrompt = null;
+const updateMode = () => document.body.classList.toggle("install-only", Boolean(installPrompt) && !image);
+
 addEventListener("beforeinstallprompt", (e) => {
   e.preventDefault();
   installPrompt = e;
-  $("install").hidden = false;
+  updateMode();
 });
 addEventListener("appinstalled", () => {
   installPrompt = null;
-  $("install").hidden = true;
+  updateMode();
 });
 $("install").addEventListener("click", async () => {
   if (!installPrompt) return;
   installPrompt.prompt();
   await installPrompt.userChoice;
   installPrompt = null;
-  $("install").hidden = true;
+  updateMode();
 });
 
 $("open").addEventListener("click", () => $("file").click());

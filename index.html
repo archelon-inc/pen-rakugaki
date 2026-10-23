@@ -12,8 +12,13 @@
 <body>
 <canvas id="board"></canvas>
 <div id="empty">
-  <button id="install" hidden>📲 インストールする</button>
-  <p>共有メニューの「ペンらくがき」で画像を送るか、<br>下の 🖼 で画像を選んでください</p>
+  <div id="intro">
+    <img src="icon-192.png" alt="" width="96" height="96">
+    <h1>ペンらくがき</h1>
+    <p>共有で受け取った画像に、<br>拡大しながらペンで書き込み、<br>共有で送り返す</p>
+    <button id="install">📲 インストールする</button>
+  </div>
+  <p id="hint">共有メニューの「ペンらくがき」で画像を送るか、<br>下の 🖼 で画像を選んでください</p>
 </div>
 
 <div id="panel" hidden>

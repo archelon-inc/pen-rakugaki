@@ -48,11 +48,27 @@ html, body {
   margin: 0;
 }
 
+/* 入れる前のブラウザで開いたときは、アプリの紹介と入れるボタンだけを出す */
+#intro {
+  display: none;
+  justify-items: center;
+  gap: 16px;
+  max-width: 320px;
+}
+
+#intro img {
+  border-radius: 22px;
+}
+
+#intro h1 {
+  margin: 0;
+  font-size: 28px;
+}
+
 #install {
   pointer-events: auto;
-  justify-self: center;
   height: 64px;
-  margin-bottom: 28px;
+  margin-top: 16px;
   padding: 0 32px;
   border-radius: 32px;
   background: var(--accent);
@@ -61,7 +77,12 @@ html, body {
   font-weight: 700;
 }
 
-#install[hidden] {
+.install-only #intro {
+  display: grid;
+}
+
+.install-only #hint,
+.install-only #bar {
   display: none;
 }
 

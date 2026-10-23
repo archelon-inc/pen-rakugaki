@@ -120,7 +120,9 @@ await sleep(1500);
 check("service worker が動く", await evaluate("navigator.serviceWorker.ready.then(() => true)"));
 check("manifest に誤りが無い", (await page("Page.getAppManifest")).errors.length === 0);
 check("インストールできる", (await page("Page.getInstallabilityErrors")).installabilityErrors.length === 0);
-check("まだ入れていなければインストールのボタンが出る", await evaluate("!document.querySelector('#install').hidden"));
+const visible = (selector) => evaluate(`getComputedStyle(document.querySelector(${JSON.stringify(selector)})).display !== "none"`);
+check("まだ入れていなければアプリの紹介とインストールのボタンが出る", (await visible("#intro")) && (await visible("#install")));
+check("紹介とインストールのボタンの他は出ない", !(await visible("#bar")) && !(await visible("#hint")));
 const empty = await shot("01-empty");
 
 // 画像を選ぶと出る
@@ -128,6 +130,7 @@ await chooseFile("#file", IMAGE);
 await sleep(800);
 const loaded = await shot("02-loaded");
 check("選んだ画像が出る", !loaded.equals(empty));
+check("画像を開いたら書くためのボタンが出る", await visible("#bar"));
 
 // ペンで書くと線が載る
 await pen(wave(60, 300, 290, 40), { force: 0.2 });
