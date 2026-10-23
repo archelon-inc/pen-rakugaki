@@ -1,0 +1,26 @@
+{
+  "name": "ペンらくがき",
+  "short_name": "ペンらくがき",
+  "description": "共有で受け取った画像を、拡大しながらペンで書き込み、共有で送り返す",
+  "lang": "ja",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "background_color": "#202124",
+  "theme_color": "#202124",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "share_target": {
+    "action": "./share",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "files": [
+        { "name": "image", "accept": ["image/*", ".png", ".jpg", ".jpeg", ".webp", ".gif"] }
+      ]
+    }
+  }
+}
