@@ -1,8 +1,8 @@
 // 共有メニューから届いた画像を受け取り、アプリの画面へ渡す。
-// 画面の部品は通信を先に試し、繋がらないときだけ手元の写しを使う（更新がすぐ届くように）。
+// 画面の部品は毎回配信元へ新しさを確かめ（ブラウザの保存を素通しにしない）、繋がらないときだけ手元の写しを使う。
 "use strict";
 
-const SHELL = "rakugaki-shell-v1";
+const SHELL = "rakugaki-shell-v2";
 const SHARED = "rakugaki-shared";
 const FILES = ["./", "index.html", "app.js", "style.css", "manifest.webmanifest", "icon-192.png", "icon-512.png"];
 
@@ -26,7 +26,7 @@ self.addEventListener("fetch", (event) => {
   }
   if (event.request.method !== "GET" || url.origin !== self.location.origin) return;
   event.respondWith(
-    fetch(event.request)
+    fetch(event.request.url, { cache: "no-cache" })
       .then((response) => {
         if (response.ok) {
           const copy = response.clone();

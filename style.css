@@ -48,7 +48,7 @@ html, body {
   margin: 0;
 }
 
-/* 入れる前のブラウザで開いたときは、アプリの紹介と入れるボタンだけを出す */
+/* ブラウザで開いたときは、アプリの紹介と入れ方だけを出す */
 #intro {
   display: none;
   justify-items: center;
@@ -58,6 +58,10 @@ html, body {
 
 #intro img {
   border-radius: 22px;
+}
+
+#intro [hidden] {
+  display: none;
 }
 
 #intro h1 {

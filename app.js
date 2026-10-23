@@ -287,7 +287,6 @@ async function loadImage(blob) {
   strokes = [];
   actions = [];
   $("empty").hidden = true;
-  updateMode();
   fit();
   updateButtons();
 }
@@ -393,27 +392,33 @@ function updateButtons() {
   $("share").disabled = !image;
 }
 
-// ---- インストール：まだ入れていないブラウザで開いたら、入れるボタンだけを出す
-// 入れられないブラウザ（iPhone など）や、断られた後は、ブラウザのまま使えるよう普段の画面にする
+// ---- インストール：ブラウザで開いたら、アプリの紹介と入れ方だけを出す。書く画面は入れたアプリの中でだけ出す
 
 let installPrompt = null;
-const updateMode = () => document.body.classList.toggle("install-only", Boolean(installPrompt) && !image);
+document.body.classList.toggle("install-only", matchMedia("(display-mode: browser)").matches);
+
+// 入れる確認を出せるときはボタンを、出せないとき（Discord などの中の窓・断られた後）は入れ方の文を出す
+function offerInstall(ready) {
+  $("install").hidden = !ready;
+  $("install-note").hidden = ready;
+}
 
 addEventListener("beforeinstallprompt", (e) => {
   e.preventDefault();
   installPrompt = e;
-  updateMode();
+  offerInstall(true);
 });
 addEventListener("appinstalled", () => {
   installPrompt = null;
-  updateMode();
+  $("install-note").textContent = "入りました。ホーム画面か、共有メニューの「ペンらくがき」から開いてください";
+  offerInstall(false);
 });
 $("install").addEventListener("click", async () => {
   if (!installPrompt) return;
   installPrompt.prompt();
-  await installPrompt.userChoice;
+  const { outcome } = await installPrompt.userChoice;
   installPrompt = null;
-  updateMode();
+  if (outcome !== "accepted") offerInstall(false);
 });
 
 $("open").addEventListener("click", () => $("file").click());
