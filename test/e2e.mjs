@@ -195,15 +195,22 @@ check("送ると書き込んだ画像が出る", readdirSync(OUT_DIR).some((f) =
 const PEN = `const board = document.querySelector("#board");
   const pen = (type, x, y) => board.dispatchEvent(new PointerEvent(type, {
     pointerId: 1, pointerType: "pen", isPrimary: true, clientX: x, clientY: y, pressure: 0.5, buttons: type === "pointerup" ? 0 : 1, bubbles: true }));`;
-// 書いている間の1コマに描くのにかかる時間（中央値）
+// ペンの1点を受けてから、その点を描いた1コマを描き終えるまでの時間（中央値）。
+// 受けるのにかかった時間と、そのコマの描画の前後に置いた印の間を足す。書いたものを残すなどの裏の仕事は
+// コマの外で走るので入らず、描く重さだけを見られる
 const frameCost = () => evaluate(`(async () => {
   ${PEN}
-  const frame = () => new Promise((r) => requestAnimationFrame((t) => r(performance.now() - t)));
   const costs = [];
   pen("pointerdown", 100, 600);
   for (let i = 1; i <= 9; i++) {
+    await new Promise((r) => requestAnimationFrame(r));
+    let frameStart = 0;
+    requestAnimationFrame(() => (frameStart = performance.now()));
+    const received = performance.now();
     pen("pointermove", 100 + i * 20, 600 + i * 5);
-    costs.push(await frame());
+    const receiving = performance.now() - received;
+    const frameEnd = await new Promise((r) => requestAnimationFrame(() => r(performance.now())));
+    costs.push(receiving + frameEnd - frameStart);
   }
   pen("pointerup", 280, 645);
   return costs.sort((a, b) => a - b)[4];
@@ -228,7 +235,7 @@ await evaluate(`(() => {
 })()`);
 check("ペンで千本の線を書ける", !(await shot("12-many")).equals(fewLines));
 const heavy = await frameCost();
-check(`千本書いても、書いている間の1コマが重くならない（${light.toFixed(1)} ms → ${heavy.toFixed(1)} ms）`, heavy < light + 50);
+check(`千本書いても、書いている間の1コマが重くならない（${light.toFixed(1)} ms → ${heavy.toFixed(1)} ms）`, heavy < light * 2 + 2);
 
 // 共有メニューから届いた画像を開く
 await evaluate(`(() => {
