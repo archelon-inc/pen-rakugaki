@@ -288,7 +288,8 @@ const half = [200 * scale, 100 * scale];
 const center = [412 / 2, 915 / 2];
 await tap("#more");
 const pasting = await shot("19-pasting");
-check("コピー・切り取りのあとは、⋯ のボタンを押すとすぐ貼れる", (await visible("#place")) && !(await visible("#subpanel")));
+check("コピー・切り取りのあとは、⋯ のボタンを押すとすぐ貼れる",
+  !(await visible("#subpanel")) && (await colors(pasting, [center[0] - 20, center[1] - 10, 40, 20])).green);
 check("貼ると、画面の真ん中に元の大きさで出る",
   (await colors(pasting, [center[0] - half[0] + 4, center[1] - half[1] + 4, half[0] * 2 - 8, half[1] * 2 - 8])).green
   && !(await colors(pasting, [center[0] + half[0] + 14, center[1] + half[1] + 14, 20, 20])).green);
@@ -298,7 +299,8 @@ const resized = await shot("20-resized");
 check("角を引くと、その場で大きくなる", (await colors(resized, [center[0] + half[0] + 14, center[1] + half[1] + 14, 20, 10])).green);
 await pen([[60, 780]]);
 const placed = await shot("21-placed");
-check("貼る途中の画像の外をペンで触ると、貼って抜ける", !(await visible("#place")) && (await colors(placed, [center[0] - 20, center[1] - 10, 40, 20])).green);
+check("貼る途中の画像の外をペンで触ると、貼って抜ける（四角が消え、画像は残る）",
+  !placed.equals(resized) && (await colors(placed, [center[0] - 20, center[1] - 10, 40, 20])).green);
 await sleep(1500);
 await page("Page.reload");
 await sleep(1500);
@@ -315,15 +317,18 @@ await pen([mid, [mid[0], mid[1] + 110], [mid[0], mid[1] + 220]]);
 const lifted = await shot("23b-lifted");
 check("範囲の中をつかんで動かすと、絵と線が動き、元の所は白くなる",
   (await colors(lifted, inner)).white && (await colors(lifted, [inner[0], inner[1] + 220, inner[2], inner[3]])).orange);
-await tap("#unplace");
-check("やめると、動かす前に戻る", (await shot("23c-unlifted")).equals(beforeCut));
+await tap("#undo");
+check("動かしている途中で元に戻すと、動かす前に戻る", (await shot("23c-unlifted")).equals(beforeCut));
 await pen([[box[0], box[1]], [box[0] + box[2], box[1] + box[3]]]);
 const selected = await shot("23d-selected");
 const end = [box[0] + box[2], box[1] + box[3]];
 await pen([end, [end[0] + 30, end[1] + 24], [end[0] + 60, end[1] + 48]]);
-check("範囲の角を引くと、絵と線がその場で大きくなる", !(await shot("23e-grown")).equals(selected));
-await tap("#place");
-check("決定すると、動かした絵と線が入る", !(await visible("#place")) && !(await shot("23f-grown-placed")).equals(beforeCut));
+const grown = await shot("23e-grown");
+check("範囲の角を引くと、絵と線がその場で大きくなる", !grown.equals(selected));
+await tap("#pen");
+const grownPlaced = await shot("23f-grown-placed");
+check("動かしている途中でペンのボタンに替えると、動かした絵と線が入る（四角が消え、絵と線は残る）",
+  !grownPlaced.equals(grown) && !grownPlaced.equals(beforeCut));
 await tap("#undo");
 check("元に戻すと、1回で動かす前に戻る", (await shot("23g-grow-undone")).equals(beforeCut));
 

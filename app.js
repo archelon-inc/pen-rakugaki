@@ -28,7 +28,8 @@ let image = null;
 // 書いたものを重ねる順に持つ。線はペンの点の並び、kind が "fill" は白で埋めた四角、"paste" は貼った画像
 let items = [];
 let actions = [];
-// 選んだ範囲と、貼る途中の画像（決めるまで書いたものに入れない）。どちらも画像の座標の四角を持つ
+// 選んだ範囲と、貼る途中の画像（決めるまで書いたものに入れない）。どちらも画像の座標の四角を持つ。
+// 貼る途中の画像は、外をペンで触るか、ほかの操作に移ると貼る。元に戻すで、貼らずにやめる
 let selection = null;
 let placing = null;
 // 選んだ範囲を持ち上げて動かしている間、元の所を白くしている四角
@@ -502,7 +503,7 @@ async function clearSheet() {
     await openBlankSheet();
     return;
   }
-  if (placing) unplace();
+  if (placing) await place();
   actions.push({ type: "clear", before: items });
   items = [{ kind: "fill", x: 0, y: 0, w: image.width, h: image.height }];
   inkStale = true;
@@ -861,6 +862,7 @@ function togglePanel(id) {
 }
 
 function setMode(next) {
+  if (placing) place();
   mode = next;
   pasteNext = false;
   selection = null;
@@ -889,16 +891,12 @@ $("fit").addEventListener("click", () => {
 });
 $("copy").addEventListener("click", copy);
 $("cut").addEventListener("click", cut);
-$("unselect").addEventListener("click", unselect);
-$("place").addEventListener("click", place);
-$("unplace").addEventListener("click", unplace);
 
 function updateButtons() {
   $("undo").disabled = actions.length === 0 && !placing;
   $("fit").disabled = !image;
   $("share").disabled = !image;
   $("selected").hidden = !selection || Boolean(drawing?.anchor);
-  $("placing").hidden = !placing;
 }
 
 // ---- インストール：ブラウザで開いたら、アプリの紹介と入れ方だけを出す。書く画面は入れたアプリの中でだけ出す

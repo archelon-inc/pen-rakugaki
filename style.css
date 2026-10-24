@@ -90,7 +90,7 @@ html, body {
   display: none;
 }
 
-#bar, #panel, #subpanel, #selected, #placing {
+#bar, #panel, #subpanel, #selected {
   position: fixed;
   left: 50%;
   transform: translateX(-50%);
@@ -130,20 +130,14 @@ html, body {
   line-height: 24px;
 }
 
-/* 選んだ範囲と貼る途中の画像への操作は、手元の帯や板と重ならないよう上に出す */
-#selected, #placing {
+/* 選んだ範囲への操作は、手元の帯や板と重ならないよう上に出す */
+#selected {
   top: max(12px, env(safe-area-inset-top));
 }
 
-#selected button, #placing button {
+#selected button {
   font-size: 16px;
   padding: 0 16px;
-}
-
-#place {
-  background: var(--accent);
-  color: #202124;
-  font-weight: 600;
 }
 
 #toast {
@@ -159,7 +153,7 @@ html, body {
   pointer-events: none;
 }
 
-#panel[hidden], #subpanel[hidden], #selected[hidden], #placing[hidden], #toast[hidden] {
+#panel[hidden], #subpanel[hidden], #selected[hidden], #toast[hidden] {
   display: none;
 }
 
