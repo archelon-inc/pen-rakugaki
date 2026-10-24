@@ -90,7 +90,7 @@ html, body {
   display: none;
 }
 
-#bar, #panel {
+#bar, #panel, #subpanel, #selected, #placing {
   position: fixed;
   left: 50%;
   transform: translateX(-50%);
@@ -106,13 +106,49 @@ html, body {
   bottom: max(12px, env(safe-area-inset-bottom));
 }
 
-#panel {
+#panel, #subpanel {
   bottom: calc(max(12px, env(safe-area-inset-bottom)) + 66px);
   flex-direction: column;
   border-radius: 20px;
 }
 
-#panel[hidden] {
+#subpanel button {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  font-size: 15px;
+}
+
+/* 選んだ範囲と貼る途中の画像への操作は、手元の帯や板と重ならないよう上に出す */
+#selected, #placing {
+  top: max(12px, env(safe-area-inset-top));
+}
+
+#selected button, #placing button {
+  font-size: 16px;
+  padding: 0 16px;
+}
+
+#place {
+  background: var(--accent);
+  color: #202124;
+  font-weight: 600;
+}
+
+#toast {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  top: calc(max(12px, env(safe-area-inset-top)) + 66px);
+  padding: 10px 16px;
+  border-radius: 20px;
+  background: var(--surface);
+  font-size: 15px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+#panel[hidden], #subpanel[hidden], #selected[hidden], #placing[hidden], #toast[hidden] {
   display: none;
 }
 

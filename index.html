@@ -10,6 +10,22 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+<svg width="0" height="0" style="position: absolute" aria-hidden="true">
+  <symbol id="icon-more" viewBox="0 0 24 24">
+    <g fill="#e8eaed"><circle cx="5" cy="12" r="2.2"/><circle cx="12" cy="12" r="2.2"/><circle cx="19" cy="12" r="2.2"/></g>
+  </symbol>
+  <symbol id="icon-erase" viewBox="0 0 24 24">
+    <g transform="rotate(-45 12 12)">
+      <rect x="2.5" y="7.5" width="19" height="9" rx="2" fill="#f48fb1"/>
+      <rect x="2.5" y="7.5" width="7" height="9" rx="2" fill="#eceff1"/>
+      <rect x="7.5" y="7.5" width="2" height="9" fill="#eceff1"/>
+    </g>
+    <path d="M4 21.5h16" stroke="#9aa0a6" stroke-width="1.5" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="icon-select" viewBox="0 0 24 24">
+    <rect x="4" y="4" width="16" height="16" rx="1" fill="none" stroke="#e8eaed" stroke-width="2" stroke-dasharray="3.5 2.5"/>
+  </symbol>
+</svg>
 <canvas id="board"></canvas>
 <div id="empty">
   <div id="intro">
@@ -19,7 +35,7 @@
     <button id="install" hidden>📲 インストールする</button>
     <p id="install-note">Chrome で開き、メニュー（⋮）の<br>「アプリをインストール」から入れてください</p>
   </div>
-  <p id="hint">共有メニューの「ペンらくがき」で<br>画像を送ってください</p>
+  <p id="hint">共有メニューの「ペンらくがき」で画像を送るか、<br>下の ⋯ の「貼る」「白紙」から始めてください</p>
 </div>
 
 <div id="panel" hidden>
@@ -43,16 +59,31 @@
   </div>
 </div>
 
+<div id="subpanel" hidden>
+  <div class="row">
+    <button data-mode="erase"><svg width="22" height="22" aria-hidden="true"><use href="#icon-erase"/></svg>消しゴム</button>
+    <button data-mode="select"><svg width="22" height="22" aria-hidden="true"><use href="#icon-select"/></svg>範囲</button>
+    <button id="paste">📋 貼る</button>
+    <button id="clear">📄 白紙</button>
+  </div>
+</div>
+
+<div id="selected" hidden>
+  <button id="copy">コピー</button>
+  <button id="cut">切り取り</button>
+  <button id="unselect">やめる</button>
+</div>
+
+<div id="placing" hidden>
+  <button id="place">決定</button>
+  <button id="unplace">やめる</button>
+</div>
+
+<div id="toast" hidden></div>
+
 <div id="bar">
   <button id="pen" aria-label="ペン"><span id="pen-tool">✒️</span><i id="pen-dot"></i></button>
-  <button id="eraser" aria-label="消しゴム"><svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true">
-    <g transform="rotate(-45 12 12)">
-      <rect x="2.5" y="7.5" width="19" height="9" rx="2" fill="#f48fb1"/>
-      <rect x="2.5" y="7.5" width="7" height="9" rx="2" fill="#eceff1"/>
-      <rect x="7.5" y="7.5" width="2" height="9" fill="#eceff1"/>
-    </g>
-    <path d="M4 21.5h16" stroke="#9aa0a6" stroke-width="1.5" stroke-linecap="round"/>
-  </svg></button>
+  <button id="more" aria-label="消しゴム・範囲・貼る・白紙"><svg width="26" height="26" aria-hidden="true"><use id="more-icon" href="#icon-more"/></svg></button>
   <button id="undo" aria-label="元に戻す" disabled>↶</button>
   <button id="fit" aria-label="全体を表示" disabled>⤢</button>
   <button id="share" aria-label="送る" disabled>送る</button>

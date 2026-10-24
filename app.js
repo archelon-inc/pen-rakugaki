@@ -1,5 +1,6 @@
 "use strict";
-// 画像の上に線を重ねる。線は画像の座標で持ち、画面へは view で写す：画面 = 画像 × scale + (x, y)。
+// 画像の上に、書いたもの（線・白で埋めた四角・貼った画像）を順に重ねる。書いたものは画像の座標で持ち、
+// 画面へは view で写す：画面 = 画像 × scale + (x, y)。
 // ペン（S Pen・マウス）で書き、指は1本で動かし2本で拡大する。
 
 const $ = (id) => document.getElementById(id);
@@ -12,14 +13,24 @@ const MARKER_RATIO = 3;
 const ERASER_RADIUS = 12;
 const SETTINGS_KEY = "rakugaki-settings";
 const TOOL_ICONS = { pen: "✒️", marker: "🖍️" };
+// 貼る途中の画像の角をつかめる範囲（画面の px）と、貼った画像が最初に占める見えている範囲の割合の上限
+const GRIP_RADIUS = 24;
+const PASTE_SHARE = 0.6;
+// これより小さく選んだ範囲は、選び損ねとみて捨てる（画面の px）
+const SELECT_MIN = 8;
 
 const settings = { tool: "pen", color: "#e53935", width: 4 };
-// 消しゴムはそのとき限りにして残さない。開き直したときに書けないと戸惑うので
-let erasing = false;
+// ペンで何をするか：書く（draw）・消す（erase）・範囲を選ぶ（select）。
+// そのとき限りにして残さない。開き直したときに書けないと戸惑うので
+let mode = "draw";
 const view = { scale: 1, x: 0, y: 0 };
 let image = null;
-let strokes = [];
+// 書いたものを重ねる順に持つ。線はペンの点の並び、kind が "fill" は白で埋めた四角、"paste" は貼った画像
+let items = [];
 let actions = [];
+// 選んだ範囲と、貼る途中の画像（決めるまで書いたものに入れない）。どちらも画像の座標の四角を持つ
+let selection = null;
+let placing = null;
 
 // ---- 描画
 
@@ -41,7 +52,7 @@ function resetInk() {
 
 function bakeInk() {
   inkCtx.clearRect(0, 0, image.width, image.height);
-  for (const stroke of strokes) drawStroke(inkCtx, stroke);
+  for (const item of items) drawItem(inkCtx, item);
   inkStale = false;
 }
 
@@ -62,7 +73,53 @@ function render() {
     ctx.drawImage(image, 0, 0);
     ctx.drawImage(ink, 0, 0, image.width, image.height);
     if (drawing?.stroke) drawStroke(ctx, drawing.stroke);
+    if (placing) {
+      ctx.drawImage(placing.bitmap, placing.x, placing.y, placing.w, placing.h);
+      outline(placing);
+      for (const [x, y] of corners(placing)) handle(x, y);
+    }
+    if (selection) outline(selection);
   });
+}
+
+// 四角の縁を、どんな背景でも見えるよう白の上に青の破線で描く。太さは画面の px で揃える
+function outline(r) {
+  const unit = 1 / view.scale;
+  ctx.save();
+  ctx.lineWidth = 2 * unit;
+  ctx.strokeStyle = "#ffffff";
+  ctx.strokeRect(r.x, r.y, r.w, r.h);
+  ctx.setLineDash([6 * unit, 6 * unit]);
+  ctx.strokeStyle = "#1e63d6";
+  ctx.strokeRect(r.x, r.y, r.w, r.h);
+  ctx.restore();
+}
+
+function handle(x, y) {
+  const unit = 1 / view.scale;
+  ctx.save();
+  ctx.fillStyle = "#1e63d6";
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = 2 * unit;
+  ctx.beginPath();
+  ctx.arc(x, y, 9 * unit, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+}
+
+// 左上・右上・左下・右下。向かいの角は 3 - i
+const corners = (r) => [[r.x, r.y], [r.x + r.w, r.y], [r.x, r.y + r.h], [r.x + r.w, r.y + r.h]];
+
+function drawItem(g, item) {
+  if (item.kind === "fill") {
+    g.fillStyle = "#ffffff";
+    g.fillRect(item.x, item.y, item.w, item.h);
+  } else if (item.kind === "paste") {
+    g.drawImage(item.bitmap, item.x, item.y, item.w, item.h);
+  } else {
+    drawStroke(g, item);
+  }
 }
 
 const pressureFactor = (p) => 0.4 + 1.2 * p;
@@ -201,7 +258,9 @@ function boxOf(points) {
   return box;
 }
 
+// 消しゴムは線だけを消し、白で埋めた四角と貼った画像は残す
 function touches(stroke, p, radius) {
+  if (stroke.kind) return false;
   const pts = stroke.points;
   const reach = radius + stroke.width / 2;
   // 囲む四角の外なら、点を1つずつ調べずに済ませる（線が増えても消しゴムが重くならないように）
@@ -216,10 +275,10 @@ function touches(stroke, p, radius) {
 
 function eraseAt(p, removed) {
   const radius = ERASER_RADIUS / view.scale;
-  for (let i = strokes.length - 1; i >= 0; i--) {
-    if (touches(strokes[i], p, radius)) {
-      removed.push({ stroke: strokes[i], index: i });
-      strokes.splice(i, 1);
+  for (let i = items.length - 1; i >= 0; i--) {
+    if (touches(items[i], p, radius)) {
+      removed.push({ item: items[i], index: i });
+      items.splice(i, 1);
       inkStale = true;
     }
   }
@@ -238,29 +297,222 @@ function strokeWidth(tool) {
   return (tool === "marker" ? settings.width * MARKER_RATIO : settings.width) / view.scale;
 }
 
+function add(item) {
+  items.push(item);
+  drawItem(inkCtx, item);
+  actions.push({ type: "add", item });
+  render();
+  changed();
+  updateButtons();
+}
+
 function undo() {
   const last = actions.pop();
   if (!last) return;
-  if (last.type === "add") strokes.splice(strokes.lastIndexOf(last.stroke), 1);
-  else for (const { stroke, index } of [...last.removed].reverse()) strokes.splice(index, 0, stroke);
+  if (last.type === "add") items.splice(items.lastIndexOf(last.item), 1);
+  else if (last.type === "clear") items = last.before;
+  else for (const { item, index } of [...last.removed].reverse()) items.splice(index, 0, item);
   inkStale = true;
   render();
   changed();
   updateButtons();
 }
 
+// ---- 範囲を選んでコピー・切り取り、クリップボードの画像を貼る、白紙にする
+
+const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
+
+function between(a, b) {
+  const x0 = clamp(Math.min(a.x, b.x), 0, image.width);
+  const y0 = clamp(Math.min(a.y, b.y), 0, image.height);
+  const x1 = clamp(Math.max(a.x, b.x), 0, image.width);
+  const y1 = clamp(Math.max(a.y, b.y), 0, image.height);
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+
+// 範囲の中の、画像と書いたものを1枚の PNG にする
+function cropped(r) {
+  const out = document.createElement("canvas");
+  out.width = Math.max(1, Math.round(r.w));
+  out.height = Math.max(1, Math.round(r.h));
+  const g = out.getContext("2d");
+  g.setTransform(out.width / r.w, 0, 0, out.height / r.h, (-r.x * out.width) / r.w, (-r.y * out.height) / r.h);
+  g.drawImage(image, 0, 0);
+  for (const item of items) drawItem(g, item);
+  return new Promise((resolve) => out.toBlob(resolve, "image/png"));
+}
+
+async function copySelection() {
+  try {
+    await navigator.clipboard.write([new ClipboardItem({ "image/png": cropped(selection) })]);
+    return true;
+  } catch (err) {
+    toast(`コピーできませんでした：${err.message}`);
+    return false;
+  }
+}
+
+function unselect() {
+  selection = null;
+  render();
+  updateButtons();
+}
+
+async function copy() {
+  if (!(await copySelection())) return;
+  unselect();
+  toast("コピーしました");
+}
+
+async function cut() {
+  const r = selection;
+  if (!(await copySelection())) return;
+  unselect();
+  add({ kind: "fill", ...r });
+  toast("切り取りました");
+}
+
+async function clipboardImage() {
+  for (const entry of await navigator.clipboard.read()) {
+    const type = entry.types.find((t) => t.startsWith("image/"));
+    if (type) return entry.getType(type);
+  }
+  return null;
+}
+
+async function paste() {
+  let blob;
+  try {
+    blob = await clipboardImage();
+  } catch {
+    toast("クリップボードを読めませんでした");
+    return;
+  }
+  if (!blob) {
+    toast("クリップボードに画像がありません");
+    return;
+  }
+  // 画像を開いていなければ、貼った画像をそのまま開く
+  if (!image) {
+    await loadImage(blob);
+    return;
+  }
+  let bitmap;
+  try {
+    bitmap = await createImageBitmap(blob);
+  } catch {
+    toast("画像として読めませんでした");
+    return;
+  }
+  // 見えている範囲の真ん中に元の大きさで出す。大きすぎれば見えている範囲に収まるよう縮める
+  const k = Math.min(1, (PASTE_SHARE * innerWidth) / (bitmap.width * view.scale), (PASTE_SHARE * innerHeight) / (bitmap.height * view.scale));
+  const w = bitmap.width * k;
+  const h = bitmap.height * k;
+  const cx = (innerWidth / 2 - view.x) / view.scale;
+  const cy = (innerHeight / 2 - view.y) / view.scale;
+  selection = null;
+  placing = { kind: "paste", bitmap, blob, x: cx - w / 2, y: cy - h / 2, w, h };
+  render();
+  updateButtons();
+}
+
+// 貼る途中の画像のどこをつかんだか：角なら 0〜3、中なら "move"、外なら null
+function gripAt(e) {
+  const p = toImage(e);
+  const i = corners(placing).findIndex(([x, y]) => Math.hypot(p.x - x, p.y - y) * view.scale <= GRIP_RADIUS);
+  if (i >= 0) return i;
+  const r = placing;
+  return p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h ? "move" : null;
+}
+
+// 中をつかめば動かし、角をつかめば向かいの角を止めたまま縦横の比を保って大きさを変える
+function grab(p) {
+  const { grip, start, from } = drawing;
+  if (grip === "move") {
+    placing.x = from.x + p.x - start.x;
+    placing.y = from.y + p.y - start.y;
+    return;
+  }
+  const [ax, ay] = corners(from)[3 - grip];
+  const smallest = GRIP_RADIUS / (view.scale * Math.min(from.w, from.h));
+  const k = Math.max(smallest, Math.abs(p.x - ax) / from.w, Math.abs(p.y - ay) / from.h);
+  placing.w = from.w * k;
+  placing.h = from.h * k;
+  placing.x = grip % 2 === 0 ? ax - placing.w : ax;
+  placing.y = grip < 2 ? ay - placing.h : ay;
+}
+
+function place() {
+  const item = placing;
+  placing = null;
+  add(item);
+}
+
+function unplace() {
+  placing = null;
+  render();
+  updateButtons();
+}
+
+async function clearSheet() {
+  if (!image) {
+    await openBlankSheet();
+    return;
+  }
+  actions.push({ type: "clear", before: items });
+  items = [{ kind: "fill", x: 0, y: 0, w: image.width, h: image.height }];
+  inkStale = true;
+  selection = null;
+  render();
+  changed();
+  updateButtons();
+}
+
+// 画像を開いていないときの白紙は、画面の大きさの白い画像を開く
+async function openBlankSheet() {
+  const dpr = devicePixelRatio || 1;
+  const sheet = document.createElement("canvas");
+  sheet.width = Math.round(innerWidth * dpr);
+  sheet.height = Math.round(innerHeight * dpr);
+  const g = sheet.getContext("2d");
+  g.fillStyle = "#ffffff";
+  g.fillRect(0, 0, sheet.width, sheet.height);
+  await loadImage(await new Promise((resolve) => sheet.toBlob(resolve, "image/png")));
+}
+
+let toastTimer = 0;
+function toast(text) {
+  $("toast").textContent = text;
+  $("toast").hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => ($("toast").hidden = true), 2000);
+}
+
 // ---- 入力
 
 canvas.addEventListener("pointerdown", (e) => {
   if (!image) return;
-  closePanel();
+  closePanels();
+  // 書いている間に触れた手のひらは無視する
+  if (drawing) return;
+  // 貼る途中の画像は、ペンでも指でもつかめる
+  const grip = placing && fingers.size === 0 ? gripAt(e) : null;
+  if (grip !== null) {
+    canvas.setPointerCapture(e.pointerId);
+    drawing = { id: e.pointerId, grip, start: toImage(e), from: { ...placing } };
+    return;
+  }
   if (isPen(e)) {
-    if (drawing) return;
+    if (placing) return;
     canvas.setPointerCapture(e.pointerId);
     fingers.clear();
     gesture = null;
-    const tool = wantsEraser(e) || erasing ? "eraser" : settings.tool;
-    if (tool === "eraser") {
+    const tool = wantsEraser(e) || mode === "erase" ? "eraser" : mode === "select" ? "select" : settings.tool;
+    if (tool === "select") {
+      selection = null;
+      drawing = { id: e.pointerId, anchor: toImage(e) };
+      updateButtons();
+    } else if (tool === "eraser") {
       drawing = { id: e.pointerId, removed: [], last: toImage(e) };
       eraseAt(drawing.last, drawing.removed);
     } else {
@@ -270,8 +522,6 @@ canvas.addEventListener("pointerdown", (e) => {
     render();
     return;
   }
-  // 書いている間に触れた手のひらは無視する
-  if (drawing) return;
   canvas.setPointerCapture(e.pointerId);
   fingers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   gesture = baseline();
@@ -279,6 +529,16 @@ canvas.addEventListener("pointerdown", (e) => {
 
 canvas.addEventListener("pointermove", (e) => {
   if (drawing && e.pointerId === drawing.id) {
+    if (drawing.grip !== undefined) {
+      grab(toImage(e));
+      render();
+      return;
+    }
+    if (drawing.anchor) {
+      selection = between(drawing.anchor, toImage(e));
+      render();
+      return;
+    }
     const coalesced = e.getCoalescedEvents ? e.getCoalescedEvents() : [];
     for (const ev of coalesced.length ? coalesced : [e]) {
       const p = toImage(ev);
@@ -299,18 +559,19 @@ canvas.addEventListener("pointermove", (e) => {
 
 function release(e) {
   if (drawing && e.pointerId === drawing.id) {
-    const { stroke, removed } = drawing;
+    const { stroke, removed, anchor } = drawing;
     drawing = null;
+    if (anchor && selection && Math.min(selection.w, selection.h) * view.scale < SELECT_MIN) selection = null;
     if (stroke) {
       stroke.box = boxOf(stroke.points);
-      strokes.push(stroke);
-      drawStroke(inkCtx, stroke);
-      actions.push({ type: "add", stroke });
-    } else if (removed.length) {
+      add(stroke);
+      return;
+    }
+    if (removed?.length) {
       actions.push({ type: "erase", removed });
+      changed();
     }
     render();
-    changed();
     updateButtons();
     return;
   }
@@ -347,8 +608,13 @@ function transact(mode, use) {
   }));
 }
 
-// 点を1つずつの物にせず x・y・筆圧の数の並びにして残す。点が多くても速く書き出せるように
+// 線の点は1つずつの物にせず x・y・筆圧の数の並びにして残す。点が多くても速く書き出せるように
 function pack(stroke) {
+  if (stroke.kind === "fill") return stroke;
+  if (stroke.kind === "paste") {
+    const { kind, blob, x, y, w, h } = stroke;
+    return { kind, blob, x, y, w, h };
+  }
   const flat = new Float64Array(stroke.points.length * 3);
   stroke.points.forEach((p, i) => {
     flat[i * 3] = p.x;
@@ -358,7 +624,9 @@ function pack(stroke) {
   return { tool: stroke.tool, color: stroke.color, width: stroke.width, points: flat };
 }
 
-function unpack(saved) {
+async function unpack(saved) {
+  if (saved.kind === "fill") return saved;
+  if (saved.kind === "paste") return { ...saved, bitmap: await createImageBitmap(saved.blob) };
   const points = [];
   for (let i = 0; i < saved.points.length; i += 3) points.push({ x: saved.points[i], y: saved.points[i + 1], p: saved.points[i + 2] });
   return { tool: saved.tool, color: saved.color, width: saved.width, points, box: boxOf(points) };
@@ -373,7 +641,7 @@ function saveStrokes() {
   if (!saveTimer) return;
   clearTimeout(saveTimer);
   saveTimer = 0;
-  const saved = strokes.map(pack);
+  const saved = items.map(pack);
   transact("readwrite", (store) => store.put(saved, "strokes")).catch(() => {
     // 残せない端末でも、開いている間は書ける
   });
@@ -385,7 +653,7 @@ addEventListener("visibilitychange", () => document.hidden && saveStrokes());
 async function restore() {
   try {
     const [kept, saved] = await transact("readonly", (store) => [store.get("image"), store.get("strokes")]);
-    if (kept.result) await showWork(kept.result, (saved.result || []).map(unpack));
+    if (kept.result) await showWork(kept.result, await Promise.all((saved.result || []).map(unpack)));
   } catch {
     // 残したものを読めなければ、まっさらから始める
   }
@@ -395,8 +663,10 @@ async function restore() {
 
 async function showWork(blob, saved) {
   image = await createImageBitmap(blob);
-  strokes = saved;
-  actions = saved.map((stroke) => ({ type: "add", stroke }));
+  items = saved;
+  actions = saved.map((item) => ({ type: "add", item }));
+  selection = null;
+  placing = null;
   resetInk();
   $("empty").hidden = true;
   fit();
@@ -451,7 +721,7 @@ async function exportFile() {
   g.fillStyle = "#ffffff";
   g.fillRect(0, 0, out.width, out.height);
   g.drawImage(image, 0, 0);
-  for (const stroke of strokes) drawStroke(g, stroke);
+  for (const item of items) drawItem(g, item);
   const blob = await new Promise((resolve) => out.toBlob(resolve, "image/jpeg", 0.92));
   return new File([blob], `rakugaki-${stamp()}.jpg`, { type: "image/jpeg" });
 }
@@ -505,8 +775,10 @@ function syncSettings() {
   }
   $("pen-tool").textContent = TOOL_ICONS[settings.tool];
   $("pen-dot").style.background = settings.color;
-  $("pen").setAttribute("aria-pressed", !erasing);
-  $("eraser").setAttribute("aria-pressed", erasing);
+  $("pen").setAttribute("aria-pressed", mode === "draw");
+  $("more").setAttribute("aria-pressed", mode !== "draw");
+  $("more-icon").setAttribute("href", `#icon-${mode === "draw" ? "more" : mode}`);
+  for (const b of document.querySelectorAll("#subpanel [data-mode]")) b.setAttribute("aria-pressed", b.dataset.mode === mode);
 }
 
 function choose(selector, apply) {
@@ -522,26 +794,51 @@ choose("#tools button", (d) => (settings.tool = d.tool));
 choose("#colors button", (d) => (settings.color = d.color));
 choose("#widths button", (d) => (settings.width = Number(d.width)));
 
-const closePanel = () => ($("panel").hidden = true);
-// ペンのボタンは、消しゴムのときは書くのに戻し、書いているときは道具・色・太さを選ぶ板を開け閉めする
-$("pen").addEventListener("click", () => {
-  if (erasing) {
-    erasing = false;
-    syncSettings();
-  } else {
-    $("panel").hidden = !$("panel").hidden;
-  }
-});
-$("eraser").addEventListener("click", () => {
-  erasing = true;
-  closePanel();
+function closePanels() {
+  $("panel").hidden = true;
+  $("subpanel").hidden = true;
+}
+
+function togglePanel(id) {
+  const open = $(id).hidden;
+  closePanels();
+  $(id).hidden = !open;
+}
+
+function setMode(next) {
+  mode = next;
+  selection = null;
+  closePanels();
   syncSettings();
+  render();
+  updateButtons();
+}
+
+// ペンのボタンは、消しゴムや範囲のときは書くのに戻し、書いているときは道具・色・太さを選ぶ板を開け閉めする
+$("pen").addEventListener("click", () => (mode === "draw" ? togglePanel("panel") : setMode("draw")));
+// ⋯ は、消しゴム・範囲・貼る・白紙のボタンをしまった板を開け閉めする
+$("more").addEventListener("click", () => togglePanel("subpanel"));
+for (const b of document.querySelectorAll("#subpanel [data-mode]")) b.addEventListener("click", () => setMode(b.dataset.mode));
+$("paste").addEventListener("click", () => {
+  closePanels();
+  paste();
 });
+$("clear").addEventListener("click", () => {
+  closePanels();
+  clearSheet();
+});
+$("copy").addEventListener("click", copy);
+$("cut").addEventListener("click", cut);
+$("unselect").addEventListener("click", unselect);
+$("place").addEventListener("click", place);
+$("unplace").addEventListener("click", unplace);
 
 function updateButtons() {
   $("undo").disabled = actions.length === 0;
   $("fit").disabled = !image;
   $("share").disabled = !image;
+  $("selected").hidden = !selection || Boolean(drawing?.anchor);
+  $("placing").hidden = !placing;
 }
 
 // ---- インストール：ブラウザで開いたら、アプリの紹介と入れ方だけを出す。書く画面は入れたアプリの中でだけ出す

@@ -58,11 +58,14 @@ const send = (method, params = {}, sessionId) => new Promise((ok, ng) => {
 const { targetId } = await send("Target.createTarget", { url: "about:blank" });
 const { sessionId } = await send("Target.attachToTarget", { targetId, flatten: true });
 const page = (method, params) => send(method, params, sessionId);
-const evaluate = async (expression) => (await page("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true })).result.value;
+const evaluate = async (expression) => (await page("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true, userGesture: true })).result.value;
 
 await page("Page.enable");
 await page("Emulation.setDeviceMetricsOverride", { width: 412, height: 915, deviceScaleFactor: 2, mobile: true });
 await page("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
+// クリップボードを読むにはページが前に出ている必要がある。ほかのアプリと同じく読み書きを許しておく
+await page("Emulation.setFocusEmulationEnabled", { enabled: true });
+await send("Browser.grantPermissions", { permissions: ["clipboardReadWrite", "clipboardSanitizedWrite"], origin: new URL(APP).origin });
 await send("Browser.setDownloadBehavior", { behavior: "allow", downloadPath: OUT_DIR });
 
 let failures = 0;
@@ -74,6 +77,8 @@ function check(name, ok) {
 // 画面を撮って残し、下のボタンの帯を除いた絵の部分を比べる材料として返す
 async function shot(name) {
   await sleep(300);
+  // 「コピーしました」などの知らせが消えてから撮る
+  await evaluate(`new Promise((r) => { const t = document.querySelector("#toast"); const wait = () => (t.hidden ? r(true) : setTimeout(wait, 100)); wait(); })`);
   const { data } = await page("Page.captureScreenshot", { format: "png" });
   await writeFile(join(OUT_DIR, `${name}.png`), Buffer.from(data, "base64"));
   const clip = { x: 0, y: 0, width: 412, height: 830, scale: 1 };
@@ -125,6 +130,38 @@ async function shareImage() {
   await sleep(2000);
 }
 
+// 画像（PNG のバイト列、または画面の写しの中の四角 [x, y, 幅, 高さ]）に、どの色があるか。
+// 赤はペンの線、橙は試験用の画像の②の枠、緑は貼るための試しの画像の色
+const PALETTE = `(d) => {
+  const has = { red: false, orange: false, green: false, white: true };
+  for (let i = 0; i < d.length; i += 4) {
+    const [r, g, b] = [d[i], d[i + 1], d[i + 2]];
+    if (r > 180 && g < 90 && b < 90) has.red = true;
+    if (r > 230 && g > 140 && g < 200 && b < 40) has.orange = true;
+    if (r < 60 && g > 150 && b < 60) has.green = true;
+    if (r < 245 || g < 245 || b < 245) has.white = false;
+  }
+  return has;
+}`;
+const colors = (png, box) => evaluate(`(async () => {
+  const bytes = Uint8Array.from(atob("${png.toString("base64")}"), (c) => c.charCodeAt(0));
+  const bmp = await createImageBitmap(new Blob([bytes], { type: "image/png" }));
+  const k = bmp.width / 412;
+  const g = new OffscreenCanvas(bmp.width, bmp.height).getContext("2d");
+  g.drawImage(bmp, 0, 0);
+  const [x, y, w, h] = ${JSON.stringify(box)}.map((v) => Math.round(v * k));
+  return (${PALETTE})(g.getImageData(x, y, w, h).data);
+})()`);
+// クリップボードの画像の大きさと色。画像が無ければ null
+const clipboard = () => evaluate(`(async () => {
+  const [entry] = await navigator.clipboard.read();
+  if (!entry || !entry.types.includes("image/png")) return null;
+  const bmp = await createImageBitmap(await entry.getType("image/png"));
+  const g = new OffscreenCanvas(bmp.width, bmp.height).getContext("2d");
+  g.drawImage(bmp, 0, 0);
+  return { width: bmp.width, height: bmp.height, ...(${PALETTE})(g.getImageData(0, 0, bmp.width, bmp.height).data) };
+})()`);
+
 const wave = (x0, y0, w, h, n = 20) => Array.from({ length: n + 1 }, (_, i) => [x0 + (w * i) / n, y0 + h * Math.sin((i / n) * Math.PI * 2)]);
 
 // 入れられるアプリとして成り立っている
@@ -133,7 +170,7 @@ await sleep(1500);
 check("service worker が動く", await evaluate("navigator.serviceWorker.ready.then(() => true)"));
 check("manifest に誤りが無い", (await page("Page.getAppManifest")).errors.length === 0);
 check("インストールできる", (await page("Page.getInstallabilityErrors")).installabilityErrors.length === 0);
-const visible = (selector) => evaluate(`getComputedStyle(document.querySelector(${JSON.stringify(selector)})).display !== "none"`);
+const visible = (selector) => evaluate(`document.querySelector(${JSON.stringify(selector)}).checkVisibility()`);
 check("ブラウザで開くとアプリの紹介とインストールのボタンが出る", (await visible("#intro")) && (await visible("#install")));
 check("ブラウザでは紹介とインストールのボタンの他は出ない", !(await visible("#bar")) && !(await visible("#hint")));
 await shot("00-browser");
@@ -183,8 +220,13 @@ await pen([[60, 250], [350, 250]]);
 const marked = await shot("07-marker");
 check("マーカーで線が載る", !marked.equals(drawn));
 
-// 消しゴムで消し、元に戻すと戻る
-await tap("#eraser");
+// 消しゴムで消し、元に戻すと戻る。消しゴム・範囲・貼る・白紙は ⋯ の中にしまってある
+check("消しゴム・範囲・貼る・白紙は、⋯ を押すまで出ない", !(await visible('[data-mode="erase"]')) && !(await visible("#clear")));
+await tap("#more");
+check("⋯ を押すと、消しゴム・範囲・貼る・白紙のボタンが出る",
+  (await visible('[data-mode="erase"]')) && (await visible('[data-mode="select"]')) && (await visible("#paste")) && (await visible("#clear")));
+await shot("07-more");
+await tap('[data-mode="erase"]');
 await pen([[200, 260], [200, 345]]);
 const erased = await shot("08-erased");
 check("消しゴムでなぞった線が消える", !erased.equals(marked));
@@ -207,6 +249,69 @@ check("開き直すと、書いたものがそのまま出る", (await shot("11-
 await tap("#share");
 await sleep(1500);
 check("送ると書き込んだ画像が出る", readdirSync(OUT_DIR).some((f) => /^rakugaki-.*\.jpg$/.test(f)));
+
+// 範囲を選んでコピーすると、範囲の中の絵と線が1枚の画像でクリップボードに入る
+await tap("#more");
+await tap('[data-mode="select"]');
+const box = [100, 280, 200, 160];
+await pen([[box[0], box[1]], [box[0] + box[2] / 2, box[1] + box[3] / 2], [box[0] + box[2], box[1] + box[3]]]);
+check("範囲を選ぶと、コピーと切り取りのボタンが出る", (await visible("#copy")) && (await visible("#cut")));
+await tap("#copy");
+const copied = await clipboard();
+check("コピーすると、範囲の中の絵と線が画像でクリップボードに入る",
+  copied?.red && copied.orange && Math.abs(copied.width / copied.height - box[2] / box[3]) < 0.05);
+
+// 切り取ると、クリップボードに入り、範囲の中は白くなる
+await page("Runtime.evaluate", { expression: "navigator.clipboard.writeText('')", awaitPromise: true, userGesture: true });
+const beforeCut = await shot("16-before-cut");
+await pen([[box[0], box[1]], [box[0] + box[2], box[1] + box[3]]]);
+await tap("#cut");
+const afterCut = await shot("17-cut");
+const inner = [box[0] + 3, box[1] + 3, box[2] - 6, box[3] - 6];
+check("切り取ると、範囲の中の絵と線がクリップボードに入る", (await clipboard())?.orange === true);
+check("切り取ると、範囲の中が白くなる", !(await colors(beforeCut, inner)).white && (await colors(afterCut, inner)).white);
+await tap("#undo");
+check("元に戻すと、切り取った所が戻る", (await shot("18-cut-undone")).equals(beforeCut));
+
+// ほかのアプリでコピーした画像を貼ると、画面の真ん中に元の大きさで出て、角を引いて大きさを変えられる
+await evaluate(`(async () => {
+  const c = new OffscreenCanvas(400, 200);
+  const g = c.getContext("2d");
+  g.fillStyle = "#00c000";
+  g.fillRect(0, 0, 400, 200);
+  await navigator.clipboard.write([new ClipboardItem({ "image/png": await c.convertToBlob({ type: "image/png" }) })]);
+  return true;
+})()`);
+const scale = await evaluate("innerWidth") / 1080;
+const half = [200 * scale, 100 * scale];
+const center = [412 / 2, 915 / 2];
+await tap("#more");
+await tap("#paste");
+const pasting = await shot("19-pasting");
+check("貼ると、決定とやめるのボタンが出る", await visible("#place"));
+check("貼ると、画面の真ん中に元の大きさで出る",
+  (await colors(pasting, [center[0] - half[0] + 4, center[1] - half[1] + 4, half[0] * 2 - 8, half[1] * 2 - 8])).green
+  && !(await colors(pasting, [center[0] + half[0] + 14, center[1] + half[1] + 14, 20, 20])).green);
+const corner = [center[0] + half[0], center[1] + half[1]];
+await pen([corner, [corner[0] + 30, corner[1] + 15], [corner[0] + 60, corner[1] + 30]]);
+const resized = await shot("20-resized");
+check("角を引くと、その場で大きくなる", (await colors(resized, [center[0] + half[0] + 14, center[1] + half[1] + 14, 20, 10])).green);
+await tap("#place");
+const placed = await shot("21-placed");
+check("決定すると、貼った画像が書いたものに入る", !(await visible("#place")) && (await colors(placed, [center[0] - 20, center[1] - 10, 40, 20])).green);
+await sleep(1500);
+await page("Page.reload");
+await sleep(1500);
+check("開き直しても、貼った画像が残る", (await shot("22-placed-reopened")).equals(placed));
+await tap("#undo");
+check("元に戻すと、貼った画像が消える", (await shot("23-paste-undone")).equals(beforeCut));
+
+// 白紙にすると絵も線も消えて白くなり、元に戻すと戻る
+await tap("#more");
+await tap("#clear");
+check("白紙にすると、絵も線も消えて白くなる", (await colors(await shot("24-clear"), [10, 30, 392, 780])).white);
+await tap("#undo");
+check("元に戻すと、白紙にする前に戻る", (await shot("25-clear-undone")).equals(beforeCut));
 
 // たくさん書いても、書いている間の1コマが重くならない（重くなり続けると、たくさん書いたあとにアプリが落ちる）。
 // CDP で1点ずつ送ると千本の線に時間がかかるので、ペンの入力をページの中で送る
@@ -238,7 +343,7 @@ await tap("#pen");
 await tap('[data-tool="pen"]');
 await fingers([[200, 150]], [[200, 150]], 0);
 const light = await frameCost();
-const fewLines = await shot("12-before-many");
+const fewLines = await shot("26-before-many");
 await evaluate(`(() => {
   ${PEN}
   for (let k = 0; k < 1000; k++) {
@@ -250,13 +355,13 @@ await evaluate(`(() => {
   }
   return true;
 })()`);
-check("ペンで千本の線を書ける", !(await shot("13-many")).equals(fewLines));
+check("ペンで千本の線を書ける", !(await shot("27-many")).equals(fewLines));
 const heavy = await frameCost();
 check(`千本書いても、書いている間の1コマが重くならない（${light.toFixed(1)} ms → ${heavy.toFixed(1)} ms）`, heavy < light * 2 + 2);
 
 // 書いている途中で別の画像が共有で届くと、前の線は消えてその画像が出る
 await shareImage();
-check("新しく共有で届いた画像は線なしで出る", (await shot("14-shared")).equals(loaded));
+check("新しく共有で届いた画像は線なしで出る", (await shot("28-shared")).equals(loaded));
 
 // 共有メニューから画像のリンク（文）が届いたら、その画像を取ってきて開く
 async function shareText(text) {
@@ -270,7 +375,7 @@ async function shareText(text) {
   await sleep(2000);
 }
 await shareText(`見て ${new URL("test/sample.png", APP).href}`);
-check("共有でリンクが届いたら、その画像が出る", (await shot("15-shared-link")).equals(loaded));
+check("共有でリンクが届いたら、その画像が出る", (await shot("29-shared-link")).equals(loaded));
 await shareText("画像の無い文");
 check("画像を取り出せない共有には、そう伝える", (await evaluate("document.querySelector('#hint').textContent")).includes("取り出せませんでした"));
 
