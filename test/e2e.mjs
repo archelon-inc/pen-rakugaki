@@ -208,6 +208,7 @@ check("2本指で拡大する", !zoomed.equals(drawn));
 await fingers([[200, 600]], [[200, 500]]);
 const moved = await shot("05-moved");
 check("1本指で動かす", !moved.equals(zoomed));
+await tap("#more");
 await tap("#fit");
 check("全体表示で拡大前に戻る（指では書いていない）", (await shot("06-fit")).equals(drawn));
 
@@ -221,10 +222,10 @@ const marked = await shot("07-marker");
 check("マーカーで線が載る", !marked.equals(drawn));
 
 // 消しゴムで消し、元に戻すと戻る。消しゴム・範囲・貼る・白紙は ⋯ の中にしまってある
-check("消しゴム・範囲・貼る・白紙は、⋯ を押すまで出ない", !(await visible('[data-mode="erase"]')) && !(await visible("#clear")));
+check("消しゴム・範囲・貼る・白紙・全体表示は、⋯ を押すまで出ない", !(await visible('[data-mode="erase"]')) && !(await visible("#fit")));
 await tap("#more");
-check("⋯ を押すと、消しゴム・範囲・貼る・白紙のボタンが出る",
-  (await visible('[data-mode="erase"]')) && (await visible('[data-mode="select"]')) && (await visible("#paste")) && (await visible("#clear")));
+check("⋯ を押すと、消しゴム・範囲・貼る・白紙・全体表示のボタンが出る",
+  (await visible('[data-mode="erase"]')) && (await visible('[data-mode="select"]')) && (await visible("#paste")) && (await visible("#clear")) && (await visible("#fit")));
 await shot("07-more");
 await tap('[data-mode="erase"]');
 await pen([[200, 260], [200, 345]]);
@@ -286,9 +287,8 @@ const scale = await evaluate("innerWidth") / 1080;
 const half = [200 * scale, 100 * scale];
 const center = [412 / 2, 915 / 2];
 await tap("#more");
-await tap("#paste");
 const pasting = await shot("19-pasting");
-check("貼ると、決定とやめるのボタンが出る", await visible("#place"));
+check("コピー・切り取りのあとは、⋯ のボタンを押すとすぐ貼れる", (await visible("#place")) && !(await visible("#subpanel")));
 check("貼ると、画面の真ん中に元の大きさで出る",
   (await colors(pasting, [center[0] - half[0] + 4, center[1] - half[1] + 4, half[0] * 2 - 8, half[1] * 2 - 8])).green
   && !(await colors(pasting, [center[0] + half[0] + 14, center[1] + half[1] + 14, 20, 20])).green);
@@ -296,15 +296,36 @@ const corner = [center[0] + half[0], center[1] + half[1]];
 await pen([corner, [corner[0] + 30, corner[1] + 15], [corner[0] + 60, corner[1] + 30]]);
 const resized = await shot("20-resized");
 check("角を引くと、その場で大きくなる", (await colors(resized, [center[0] + half[0] + 14, center[1] + half[1] + 14, 20, 10])).green);
-await tap("#place");
+await pen([[60, 780]]);
 const placed = await shot("21-placed");
-check("決定すると、貼った画像が書いたものに入る", !(await visible("#place")) && (await colors(placed, [center[0] - 20, center[1] - 10, 40, 20])).green);
+check("貼る途中の画像の外をペンで触ると、貼って抜ける", !(await visible("#place")) && (await colors(placed, [center[0] - 20, center[1] - 10, 40, 20])).green);
 await sleep(1500);
 await page("Page.reload");
 await sleep(1500);
 check("開き直しても、貼った画像が残る", (await shot("22-placed-reopened")).equals(placed));
 await tap("#undo");
 check("元に戻すと、貼った画像が消える", (await shot("23-paste-undone")).equals(beforeCut));
+
+// 範囲を選んだあとは、貼る途中の画像と同じく、中をつかんで動かし、角を引いて大きさを変えられる。元の所は白くなる
+await tap("#more");
+await tap('[data-mode="select"]');
+await pen([[box[0], box[1]], [box[0] + box[2], box[1] + box[3]]]);
+const mid = [box[0] + box[2] / 2, box[1] + box[3] / 2];
+await pen([mid, [mid[0], mid[1] + 110], [mid[0], mid[1] + 220]]);
+const lifted = await shot("23b-lifted");
+check("範囲の中をつかんで動かすと、絵と線が動き、元の所は白くなる",
+  (await colors(lifted, inner)).white && (await colors(lifted, [inner[0], inner[1] + 220, inner[2], inner[3]])).orange);
+await tap("#unplace");
+check("やめると、動かす前に戻る", (await shot("23c-unlifted")).equals(beforeCut));
+await pen([[box[0], box[1]], [box[0] + box[2], box[1] + box[3]]]);
+const selected = await shot("23d-selected");
+const end = [box[0] + box[2], box[1] + box[3]];
+await pen([end, [end[0] + 30, end[1] + 24], [end[0] + 60, end[1] + 48]]);
+check("範囲の角を引くと、絵と線がその場で大きくなる", !(await shot("23e-grown")).equals(selected));
+await tap("#place");
+check("決定すると、動かした絵と線が入る", !(await visible("#place")) && !(await shot("23f-grown-placed")).equals(beforeCut));
+await tap("#undo");
+check("元に戻すと、1回で動かす前に戻る", (await shot("23g-grow-undone")).equals(beforeCut));
 
 // 白紙にすると絵も線も消えて白くなり、元に戻すと戻る
 await tap("#more");

@@ -22,6 +22,12 @@
     </g>
     <path d="M4 21.5h16" stroke="#9aa0a6" stroke-width="1.5" stroke-linecap="round"/>
   </symbol>
+  <symbol id="icon-paste" viewBox="0 0 24 24">
+    <rect x="4.5" y="4" width="15" height="18" rx="2" fill="#c58b4d"/>
+    <rect x="6.5" y="7" width="11" height="13" rx="1" fill="#ffffff"/>
+    <rect x="8.5" y="2.5" width="7" height="3.5" rx="1" fill="#9aa0a6"/>
+    <path d="M9 11h6M9 14h6M9 17h4" stroke="#9aa0a6" stroke-width="1.3"/>
+  </symbol>
   <symbol id="icon-select" viewBox="0 0 24 24">
     <rect x="4" y="4" width="16" height="16" rx="1" fill="none" stroke="#e8eaed" stroke-width="2" stroke-dasharray="3.5 2.5"/>
   </symbol>
@@ -61,10 +67,11 @@
 
 <div id="subpanel" hidden>
   <div class="row">
-    <button data-mode="erase"><svg width="22" height="22" aria-hidden="true"><use href="#icon-erase"/></svg>消しゴム</button>
-    <button data-mode="select"><svg width="22" height="22" aria-hidden="true"><use href="#icon-select"/></svg>範囲</button>
-    <button id="paste">📋 貼る</button>
-    <button id="clear">📄 白紙</button>
+    <button data-mode="erase"><svg width="24" height="24" aria-hidden="true"><use href="#icon-erase"/></svg>消しゴム</button>
+    <button data-mode="select"><svg width="24" height="24" aria-hidden="true"><use href="#icon-select"/></svg>範囲</button>
+    <button id="paste"><svg width="24" height="24" aria-hidden="true"><use href="#icon-paste"/></svg>貼る</button>
+    <button id="clear"><span aria-hidden="true">📄</span>白紙</button>
+    <button id="fit" disabled><span aria-hidden="true">⤢</span>全体表示</button>
   </div>
 </div>
 
@@ -83,9 +90,8 @@
 
 <div id="bar">
   <button id="pen" aria-label="ペン"><span id="pen-tool">✒️</span><i id="pen-dot"></i></button>
-  <button id="more" aria-label="消しゴム・範囲・貼る・白紙"><svg width="26" height="26" aria-hidden="true"><use id="more-icon" href="#icon-more"/></svg></button>
+  <button id="more" aria-label="消しゴム・範囲・貼る・白紙・全体表示"><svg width="26" height="26" aria-hidden="true"><use id="more-icon" href="#icon-more"/></svg></button>
   <button id="undo" aria-label="元に戻す" disabled>↶</button>
-  <button id="fit" aria-label="全体を表示" disabled>⤢</button>
   <button id="share" aria-label="送る" disabled>送る</button>
 </div>
 

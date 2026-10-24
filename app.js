@@ -31,6 +31,10 @@ let actions = [];
 // 選んだ範囲と、貼る途中の画像（決めるまで書いたものに入れない）。どちらも画像の座標の四角を持つ
 let selection = null;
 let placing = null;
+// 選んだ範囲を持ち上げて動かしている間、元の所を白くしている四角
+let lifted = null;
+// コピー・切り取りのあとは、⋯ のボタンを貼るボタンにする
+let pasteNext = false;
 
 // ---- 描画
 
@@ -78,7 +82,10 @@ function render() {
       outline(placing);
       for (const [x, y] of corners(placing)) handle(x, y);
     }
-    if (selection) outline(selection);
+    if (selection) {
+      outline(selection);
+      if (!drawing?.anchor) for (const [x, y] of corners(selection)) handle(x, y);
+    }
   });
 }
 
@@ -300,16 +307,20 @@ function strokeWidth(tool) {
 function add(item) {
   items.push(item);
   drawItem(inkCtx, item);
-  actions.push({ type: "add", item });
+  actions.push({ type: "add", added: [item] });
   render();
   changed();
   updateButtons();
 }
 
 function undo() {
+  if (placing) {
+    unplace();
+    return;
+  }
   const last = actions.pop();
   if (!last) return;
-  if (last.type === "add") items.splice(items.lastIndexOf(last.item), 1);
+  if (last.type === "add") for (const item of last.added) items.splice(items.lastIndexOf(item), 1);
   else if (last.type === "clear") items = last.before;
   else for (const { item, index } of [...last.removed].reverse()) items.splice(index, 0, item);
   inkStale = true;
@@ -330,8 +341,8 @@ function between(a, b) {
   return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 }
 
-// 範囲の中の、画像と書いたものを1枚の PNG にする
-function cropped(r) {
+// 範囲の中の、画像と書いたものを1枚の絵にする
+function crop(r) {
   const out = document.createElement("canvas");
   out.width = Math.max(1, Math.round(r.w));
   out.height = Math.max(1, Math.round(r.h));
@@ -339,12 +350,16 @@ function cropped(r) {
   g.setTransform(out.width / r.w, 0, 0, out.height / r.h, (-r.x * out.width) / r.w, (-r.y * out.height) / r.h);
   g.drawImage(image, 0, 0);
   for (const item of items) drawItem(g, item);
-  return new Promise((resolve) => out.toBlob(resolve, "image/png"));
+  return out;
 }
+
+const pngOf = (canvas) => new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
 
 async function copySelection() {
   try {
-    await navigator.clipboard.write([new ClipboardItem({ "image/png": cropped(selection) })]);
+    await navigator.clipboard.write([new ClipboardItem({ "image/png": pngOf(crop(selection)) })]);
+    pasteNext = true;
+    syncSettings();
     return true;
   } catch (err) {
     toast(`コピーできませんでした：${err.message}`);
@@ -381,6 +396,9 @@ async function clipboardImage() {
 }
 
 async function paste() {
+  if (placing) await place();
+  pasteNext = false;
+  syncSettings();
   let blob;
   try {
     blob = await clipboardImage();
@@ -416,13 +434,23 @@ async function paste() {
   updateButtons();
 }
 
-// 貼る途中の画像のどこをつかんだか：角なら 0〜3、中なら "move"、外なら null
-function gripAt(e) {
+// 四角のどこをつかんだか：角なら 0〜3、中なら "move"、外なら null
+function gripAt(r, e) {
   const p = toImage(e);
-  const i = corners(placing).findIndex(([x, y]) => Math.hypot(p.x - x, p.y - y) * view.scale <= GRIP_RADIUS);
+  const i = corners(r).findIndex(([x, y]) => Math.hypot(p.x - x, p.y - y) * view.scale <= GRIP_RADIUS);
   if (i >= 0) return i;
-  const r = placing;
   return p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h ? "move" : null;
+}
+
+// 選んだ範囲の絵と線を持ち上げ、貼る途中の画像と同じく動かせるようにする。元の所は白くし、やめると戻す
+function lift() {
+  const r = selection;
+  const bitmap = crop(r);
+  lifted = { kind: "fill", ...r };
+  items.push(lifted);
+  drawItem(inkCtx, lifted);
+  selection = null;
+  placing = { kind: "paste", bitmap, blob: null, ...r };
 }
 
 // 中をつかめば動かし、角をつかめば向かいの角を止めたまま縦横の比を保って大きさを変える
@@ -442,13 +470,28 @@ function grab(p) {
   placing.y = grip < 2 ? ay - placing.h : ay;
 }
 
-function place() {
+// 貼る途中の画像を書いたものに入れる。持ち上げた範囲なら、元の所の白と合わせて1回の元に戻すで戻る
+async function place() {
   const item = placing;
+  const blob = item.blob ?? (await pngOf(item.bitmap));
+  if (placing !== item) return;
   placing = null;
-  add(item);
+  item.blob = blob;
+  items.push(item);
+  drawItem(inkCtx, item);
+  actions.push({ type: "add", added: lifted ? [lifted, item] : [item] });
+  lifted = null;
+  render();
+  changed();
+  updateButtons();
 }
 
 function unplace() {
+  if (lifted) {
+    items.splice(items.lastIndexOf(lifted), 1);
+    lifted = null;
+    inkStale = true;
+  }
   placing = null;
   render();
   updateButtons();
@@ -459,6 +502,7 @@ async function clearSheet() {
     await openBlankSheet();
     return;
   }
+  if (placing) unplace();
   actions.push({ type: "clear", before: items });
   items = [{ kind: "fill", x: 0, y: 0, w: image.width, h: image.height }];
   inkStale = true;
@@ -495,15 +539,23 @@ canvas.addEventListener("pointerdown", (e) => {
   closePanels();
   // 書いている間に触れた手のひらは無視する
   if (drawing) return;
-  // 貼る途中の画像は、ペンでも指でもつかめる
-  const grip = placing && fingers.size === 0 ? gripAt(e) : null;
+  // 貼る途中の画像と選んだ範囲は、ペンでも指でもつかめる。範囲はつかんだときに持ち上げる
+  const frame = placing ?? selection;
+  const grip = frame && fingers.size === 0 ? gripAt(frame, e) : null;
   if (grip !== null) {
+    if (!placing) lift();
     canvas.setPointerCapture(e.pointerId);
     drawing = { id: e.pointerId, grip, start: toImage(e), from: { ...placing } };
+    render();
+    updateButtons();
     return;
   }
   if (isPen(e)) {
-    if (placing) return;
+    // 貼る途中の画像の外をペンで触ったら、貼って抜ける
+    if (placing) {
+      place();
+      return;
+    }
     canvas.setPointerCapture(e.pointerId);
     fingers.clear();
     gesture = null;
@@ -664,9 +716,10 @@ async function restore() {
 async function showWork(blob, saved) {
   image = await createImageBitmap(blob);
   items = saved;
-  actions = saved.map((item) => ({ type: "add", item }));
+  actions = saved.map((item) => ({ type: "add", added: [item] }));
   selection = null;
   placing = null;
+  lifted = null;
   resetInk();
   $("empty").hidden = true;
   fit();
@@ -727,6 +780,7 @@ async function exportFile() {
 }
 
 async function send() {
+  if (placing) await place();
   const file = await exportFile();
   if (navigator.canShare && navigator.canShare({ files: [file] })) {
     try {
@@ -777,7 +831,8 @@ function syncSettings() {
   $("pen-dot").style.background = settings.color;
   $("pen").setAttribute("aria-pressed", mode === "draw");
   $("more").setAttribute("aria-pressed", mode !== "draw");
-  $("more-icon").setAttribute("href", `#icon-${mode === "draw" ? "more" : mode}`);
+  $("more-icon").setAttribute("href", `#icon-${pasteNext ? "paste" : mode === "draw" ? "more" : mode}`);
+  $("more").setAttribute("aria-label", pasteNext ? "貼る" : "消しゴム・範囲・貼る・白紙・全体表示");
   for (const b of document.querySelectorAll("#subpanel [data-mode]")) b.setAttribute("aria-pressed", b.dataset.mode === mode);
 }
 
@@ -807,6 +862,7 @@ function togglePanel(id) {
 
 function setMode(next) {
   mode = next;
+  pasteNext = false;
   selection = null;
   closePanels();
   syncSettings();
@@ -816,8 +872,8 @@ function setMode(next) {
 
 // ペンのボタンは、消しゴムや範囲のときは書くのに戻し、書いているときは道具・色・太さを選ぶ板を開け閉めする
 $("pen").addEventListener("click", () => (mode === "draw" ? togglePanel("panel") : setMode("draw")));
-// ⋯ は、消しゴム・範囲・貼る・白紙のボタンをしまった板を開け閉めする
-$("more").addEventListener("click", () => togglePanel("subpanel"));
+// ⋯ は、消しゴム・範囲・貼る・白紙・全体表示のボタンをしまった板を開け閉めする。コピー・切り取りのあとは貼る
+$("more").addEventListener("click", () => (pasteNext ? paste() : togglePanel("subpanel")));
 for (const b of document.querySelectorAll("#subpanel [data-mode]")) b.addEventListener("click", () => setMode(b.dataset.mode));
 $("paste").addEventListener("click", () => {
   closePanels();
@@ -827,6 +883,10 @@ $("clear").addEventListener("click", () => {
   closePanels();
   clearSheet();
 });
+$("fit").addEventListener("click", () => {
+  closePanels();
+  fit();
+});
 $("copy").addEventListener("click", copy);
 $("cut").addEventListener("click", cut);
 $("unselect").addEventListener("click", unselect);
@@ -834,7 +894,7 @@ $("place").addEventListener("click", place);
 $("unplace").addEventListener("click", unplace);
 
 function updateButtons() {
-  $("undo").disabled = actions.length === 0;
+  $("undo").disabled = actions.length === 0 && !placing;
   $("fit").disabled = !image;
   $("share").disabled = !image;
   $("selected").hidden = !selection || Boolean(drawing?.anchor);
@@ -871,7 +931,6 @@ $("install").addEventListener("click", async () => {
 });
 
 $("undo").addEventListener("click", undo);
-$("fit").addEventListener("click", fit);
 $("share").addEventListener("click", send);
 addEventListener("resize", resize);
 
