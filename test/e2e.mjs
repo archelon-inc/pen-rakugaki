@@ -112,6 +112,19 @@ async function chooseFile(selector, path) {
   await page("DOM.setFileInputFiles", { nodeId, files: [path] });
 }
 
+// 共有メニューから画像を送ったときと同じく、共有の入口へ画像を POST して開く
+async function shareImage() {
+  await evaluate(`(() => {
+    const form = Object.assign(document.createElement("form"), { method: "POST", action: "share", enctype: "multipart/form-data" });
+    form.append(Object.assign(document.createElement("input"), { type: "file", name: "image", id: "shared-input" }));
+    document.body.append(form);
+    return true;
+  })()`);
+  await chooseFile("#shared-input", IMAGE);
+  await evaluate("document.querySelector('#shared-input').form.submit(), true");
+  await sleep(2000);
+}
+
 const wave = (x0, y0, w, h, n = 20) => Array.from({ length: n + 1 }, (_, i) => [x0 + (w * i) / n, y0 + h * Math.sin((i / n) * Math.PI * 2)]);
 
 // 入れられるアプリとして成り立っている
@@ -136,13 +149,14 @@ await page("Page.addScriptToEvaluateOnNewDocument", {
 await page("Page.reload");
 await sleep(1500);
 check("入れたアプリでは紹介を出さず、書くためのボタンを出す", !(await visible("#intro")) && (await visible("#bar")));
+check("画像は共有でだけ受け取り、端末の画像を選ぶ入口は無い", await evaluate(`document.querySelectorAll('input[type="file"]').length === 0`));
 const empty = await shot("01-empty");
 
-// 画像を選ぶと出る
-await chooseFile("#file", IMAGE);
-await sleep(800);
+// 共有メニューから届いた画像を開く
+await shareImage();
+check("共有の後は URL に印が残らない", (await evaluate("location.search")) === "");
 const loaded = await shot("02-loaded");
-check("選んだ画像が出る", !loaded.equals(empty));
+check("共有で届いた画像が出る", !loaded.equals(empty));
 
 // ペンで書くと線が載る
 await pen(wave(60, 300, 290, 40), { force: 0.2 });
@@ -170,20 +184,24 @@ const marked = await shot("07-marker");
 check("マーカーで線が載る", !marked.equals(drawn));
 
 // 消しゴムで消し、元に戻すと戻る
-await tap("#pen");
-await tap('[data-tool="eraser"]');
-await fingers([[200, 150]], [[200, 150]], 0);
+await tap("#eraser");
 await pen([[200, 260], [200, 345]]);
 const erased = await shot("08-erased");
 check("消しゴムでなぞった線が消える", !erased.equals(marked));
 await tap("#undo");
 check("元に戻すと消した線が戻る", (await shot("09-undo")).equals(marked));
 
+// 消しゴムからペンのボタンで書くのに戻る
+await tap("#pen");
+await pen(wave(60, 540, 290, 30));
+const rewritten = await shot("10-pen-again");
+check("消しゴムのあとにペンのボタンを押すと、書くのに戻る", !rewritten.equals(marked));
+
 // アプリが落ちても閉じても、開き直せば書いたものが残っている
 await sleep(1500);
 await page("Page.reload");
 await sleep(1500);
-check("開き直すと、書いたものがそのまま出る", (await shot("10-reopened")).equals(marked));
+check("開き直すと、書いたものがそのまま出る", (await shot("11-reopened")).equals(rewritten));
 
 // 送る（共有の無い環境では画像を書き出す）
 await tap("#share");
@@ -215,13 +233,12 @@ const frameCost = () => evaluate(`(async () => {
   pen("pointerup", 280, 645);
   return costs.sort((a, b) => a - b)[4];
 })()`);
-await chooseFile("#file", IMAGE);
-await sleep(800);
+await shareImage();
 await tap("#pen");
 await tap('[data-tool="pen"]');
 await fingers([[200, 150]], [[200, 150]], 0);
 const light = await frameCost();
-const fewLines = await shot("11-before-many");
+const fewLines = await shot("12-before-many");
 await evaluate(`(() => {
   ${PEN}
   for (let k = 0; k < 1000; k++) {
@@ -233,22 +250,13 @@ await evaluate(`(() => {
   }
   return true;
 })()`);
-check("ペンで千本の線を書ける", !(await shot("12-many")).equals(fewLines));
+check("ペンで千本の線を書ける", !(await shot("13-many")).equals(fewLines));
 const heavy = await frameCost();
 check(`千本書いても、書いている間の1コマが重くならない（${light.toFixed(1)} ms → ${heavy.toFixed(1)} ms）`, heavy < light * 2 + 2);
 
-// 共有メニューから届いた画像を開く
-await evaluate(`(() => {
-  const form = Object.assign(document.createElement("form"), { method: "POST", action: "share", enctype: "multipart/form-data" });
-  form.append(Object.assign(document.createElement("input"), { type: "file", name: "image", id: "shared-input" }));
-  document.body.append(form);
-  return true;
-})()`);
-await chooseFile("#shared-input", IMAGE);
-await evaluate("document.querySelector('#shared-input').form.submit(), true");
-await sleep(2000);
-check("共有の後は URL に印が残らない", (await evaluate("location.search")) === "");
-check("共有で届いた画像が線なしで出る", (await shot("13-shared")).equals(loaded));
+// 書いている途中で別の画像が共有で届くと、前の線は消えてその画像が出る
+await shareImage();
+check("新しく共有で届いた画像は線なしで出る", (await shot("14-shared")).equals(loaded));
 
 // 共有メニューから画像のリンク（文）が届いたら、その画像を取ってきて開く
 async function shareText(text) {
@@ -262,7 +270,7 @@ async function shareText(text) {
   await sleep(2000);
 }
 await shareText(`見て ${new URL("test/sample.png", APP).href}`);
-check("共有でリンクが届いたら、その画像が出る", (await shot("14-shared-link")).equals(loaded));
+check("共有でリンクが届いたら、その画像が出る", (await shot("15-shared-link")).equals(loaded));
 await shareText("画像の無い文");
 check("画像を取り出せない共有には、そう伝える", (await evaluate("document.querySelector('#hint').textContent")).includes("取り出せませんでした"));
 

@@ -19,14 +19,13 @@
     <button id="install" hidden>📲 インストールする</button>
     <p id="install-note">Chrome で開き、メニュー（⋮）の<br>「アプリをインストール」から入れてください</p>
   </div>
-  <p id="hint">共有メニューの「ペンらくがき」で画像を送るか、<br>下の 🖼 で画像を選んでください</p>
+  <p id="hint">共有メニューの「ペンらくがき」で<br>画像を送ってください</p>
 </div>
 
 <div id="panel" hidden>
   <div class="row" id="tools">
     <button data-tool="pen" aria-label="ペン">✒️</button>
     <button data-tool="marker" aria-label="マーカー">🖍️</button>
-    <button data-tool="eraser" aria-label="消しゴム">🧽</button>
   </div>
   <div class="row" id="colors">
     <button data-color="#e53935" aria-label="赤"></button>
@@ -45,9 +44,8 @@
 </div>
 
 <div id="bar">
-  <button id="open" aria-label="画像を選ぶ">🖼</button>
-  <input id="file" type="file" accept="image/*" hidden>
-  <button id="pen" aria-label="ペンの設定"><span id="pen-tool">✒️</span><i id="pen-dot"></i></button>
+  <button id="pen" aria-label="ペン"><span id="pen-tool">✒️</span><i id="pen-dot"></i></button>
+  <button id="eraser" aria-label="消しゴム">🧽</button>
   <button id="undo" aria-label="元に戻す" disabled>↶</button>
   <button id="fit" aria-label="全体を表示" disabled>⤢</button>
   <button id="share" aria-label="送る" disabled>送る</button>

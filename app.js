@@ -11,9 +11,11 @@ const MARKER_ALPHA = 0.4;
 const MARKER_RATIO = 3;
 const ERASER_RADIUS = 12;
 const SETTINGS_KEY = "rakugaki-settings";
-const TOOL_ICONS = { pen: "✒️", marker: "🖍️", eraser: "🧽" };
+const TOOL_ICONS = { pen: "✒️", marker: "🖍️" };
 
 const settings = { tool: "pen", color: "#e53935", width: 4 };
+// 消しゴムはそのとき限りにして残さない。開き直したときに書けないと戸惑うので
+let erasing = false;
 const view = { scale: 1, x: 0, y: 0 };
 let image = null;
 let strokes = [];
@@ -257,7 +259,7 @@ canvas.addEventListener("pointerdown", (e) => {
     canvas.setPointerCapture(e.pointerId);
     fingers.clear();
     gesture = null;
-    const tool = wantsEraser(e) ? "eraser" : settings.tool;
+    const tool = wantsEraser(e) || erasing ? "eraser" : settings.tool;
     if (tool === "eraser") {
       drawing = { id: e.pointerId, removed: [], last: toImage(e) };
       eraseAt(drawing.last, drawing.removed);
@@ -479,6 +481,7 @@ function loadSettings() {
   } catch {
     // 保存先が使えないときは既定のまま使う
   }
+  if (!(settings.tool in TOOL_ICONS)) settings.tool = "pen";
 }
 
 function saveSettings() {
@@ -502,6 +505,8 @@ function syncSettings() {
   }
   $("pen-tool").textContent = TOOL_ICONS[settings.tool];
   $("pen-dot").style.background = settings.color;
+  $("pen").setAttribute("aria-pressed", !erasing);
+  $("eraser").setAttribute("aria-pressed", erasing);
 }
 
 function choose(selector, apply) {
@@ -518,7 +523,20 @@ choose("#colors button", (d) => (settings.color = d.color));
 choose("#widths button", (d) => (settings.width = Number(d.width)));
 
 const closePanel = () => ($("panel").hidden = true);
-$("pen").addEventListener("click", () => ($("panel").hidden = !$("panel").hidden));
+// ペンのボタンは、消しゴムのときは書くのに戻し、書いているときは道具・色・太さを選ぶ板を開け閉めする
+$("pen").addEventListener("click", () => {
+  if (erasing) {
+    erasing = false;
+    syncSettings();
+  } else {
+    $("panel").hidden = !$("panel").hidden;
+  }
+});
+$("eraser").addEventListener("click", () => {
+  erasing = true;
+  closePanel();
+  syncSettings();
+});
 
 function updateButtons() {
   $("undo").disabled = actions.length === 0;
@@ -555,12 +573,6 @@ $("install").addEventListener("click", async () => {
   if (outcome !== "accepted") offerInstall(false);
 });
 
-$("open").addEventListener("click", () => $("file").click());
-$("file").addEventListener("change", () => {
-  const file = $("file").files[0];
-  $("file").value = "";
-  if (file) loadImage(file);
-});
 $("undo").addEventListener("click", undo);
 $("fit").addEventListener("click", fit);
 $("share").addEventListener("click", send);
