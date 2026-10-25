@@ -221,11 +221,11 @@ await pen([[60, 250], [350, 250]]);
 const marked = await shot("07-marker");
 check("マーカーで線が載る", !marked.equals(drawn));
 
-// 消しゴムで消し、元に戻すと戻る。消しゴム・範囲・貼る・白紙は ⋯ の中にしまってある
-check("消しゴム・範囲・貼る・白紙・全体表示は、⋯ を押すまで出ない", !(await visible('[data-mode="erase"]')) && !(await visible("#fit")));
+// 消しゴムで消し、元に戻すと戻る。範囲は下の帯にあり、消しゴム・貼る・白紙・全体表示は ⋯ の中にしまってある
+check("消しゴム・貼る・白紙・全体表示は、⋯ を押すまで出ない", (await visible("#select")) && !(await visible('[data-mode="erase"]')) && !(await visible("#fit")));
 await tap("#more");
-check("⋯ を押すと、消しゴム・範囲・貼る・白紙・全体表示のボタンが出る",
-  (await visible('[data-mode="erase"]')) && (await visible('[data-mode="select"]')) && (await visible("#paste")) && (await visible("#clear")) && (await visible("#fit")));
+check("⋯ を押すと、消しゴム・貼る・白紙・全体表示のボタンが出る",
+  (await visible('[data-mode="erase"]')) && (await visible("#paste")) && (await visible("#clear")) && (await visible("#fit")));
 await shot("07-more");
 await tap('[data-mode="erase"]');
 await pen([[200, 260], [200, 345]]);
@@ -252,8 +252,8 @@ await sleep(1500);
 check("送ると書き込んだ画像が出る", readdirSync(OUT_DIR).some((f) => /^rakugaki-.*\.jpg$/.test(f)));
 
 // 範囲を選んでコピーすると、範囲の中の絵と線が1枚の画像でクリップボードに入る
-await tap("#more");
-await tap('[data-mode="select"]');
+await tap("#select");
+check("範囲のボタンを押すと、押されている見た目になる", await evaluate(`document.querySelector("#select").getAttribute("aria-pressed") === "true"`));
 const box = [100, 280, 200, 160];
 await pen([[box[0], box[1]], [box[0] + box[2] / 2, box[1] + box[3] / 2], [box[0] + box[2], box[1] + box[3]]]);
 check("範囲を選ぶと、コピーと切り取りのボタンが出る", (await visible("#copy")) && (await visible("#cut")));
@@ -286,9 +286,9 @@ await evaluate(`(async () => {
 const scale = await evaluate("innerWidth") / 1080;
 const half = [200 * scale, 100 * scale];
 const center = [412 / 2, 915 / 2];
-await tap("#more");
+await tap("#select");
 const pasting = await shot("19-pasting");
-check("コピー・切り取りのあとは、⋯ のボタンを押すとすぐ貼れる",
+check("コピー・切り取りのあとは、範囲のボタンを押すとすぐ貼れる",
   !(await visible("#subpanel")) && (await colors(pasting, [center[0] - 20, center[1] - 10, 40, 20])).green);
 check("貼ると、画面の真ん中に元の大きさで出る",
   (await colors(pasting, [center[0] - half[0] + 4, center[1] - half[1] + 4, half[0] * 2 - 8, half[1] * 2 - 8])).green
@@ -309,8 +309,7 @@ await tap("#undo");
 check("元に戻すと、貼った画像が消える", (await shot("23-paste-undone")).equals(beforeCut));
 
 // 範囲を選んだあとは、貼る途中の画像と同じく、中をつかんで動かし、角を引いて大きさを変えられる。元の所は白くなる
-await tap("#more");
-await tap('[data-mode="select"]');
+await tap("#select");
 await pen([[box[0], box[1]], [box[0] + box[2], box[1] + box[3]]]);
 const mid = [box[0] + box[2] / 2, box[1] + box[3] / 2];
 await pen([mid, [mid[0], mid[1] + 110], [mid[0], mid[1] + 220]]);

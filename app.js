@@ -34,7 +34,7 @@ let selection = null;
 let placing = null;
 // 選んだ範囲を持ち上げて動かしている間、元の所を白くしている四角
 let lifted = null;
-// コピー・切り取りのあとは、⋯ のボタンを貼るボタンにする
+// コピー・切り取りのあとは、範囲のボタンを貼るボタンにする
 let pasteNext = false;
 
 // ---- 描画
@@ -831,9 +831,11 @@ function syncSettings() {
   $("pen-tool").textContent = TOOL_ICONS[settings.tool];
   $("pen-dot").style.background = settings.color;
   $("pen").setAttribute("aria-pressed", mode === "draw");
-  $("more").setAttribute("aria-pressed", mode !== "draw");
-  $("more-icon").setAttribute("href", `#icon-${pasteNext ? "paste" : mode === "draw" ? "more" : mode}`);
-  $("more").setAttribute("aria-label", pasteNext ? "貼る" : "消しゴム・範囲・貼る・白紙・全体表示");
+  $("select").setAttribute("aria-pressed", mode === "select");
+  $("select-icon").setAttribute("href", `#icon-${pasteNext ? "paste" : "select"}`);
+  $("select").setAttribute("aria-label", pasteNext ? "貼る" : "範囲");
+  $("more").setAttribute("aria-pressed", mode === "erase");
+  $("more-icon").setAttribute("href", `#icon-${mode === "erase" ? "erase" : "more"}`);
   for (const b of document.querySelectorAll("#subpanel [data-mode]")) b.setAttribute("aria-pressed", b.dataset.mode === mode);
 }
 
@@ -874,8 +876,10 @@ function setMode(next) {
 
 // ペンのボタンは、消しゴムや範囲のときは書くのに戻し、書いているときは道具・色・太さを選ぶ板を開け閉めする
 $("pen").addEventListener("click", () => (mode === "draw" ? togglePanel("panel") : setMode("draw")));
-// ⋯ は、消しゴム・範囲・貼る・白紙・全体表示のボタンをしまった板を開け閉めする。コピー・切り取りのあとは貼る
-$("more").addEventListener("click", () => (pasteNext ? paste() : togglePanel("subpanel")));
+// 範囲のボタンは範囲を選ぶのに替える。コピー・切り取りのあとは貼る
+$("select").addEventListener("click", () => (pasteNext ? paste() : setMode("select")));
+// ⋯ は、消しゴム・貼る・白紙・全体表示のボタンをしまった板を開け閉めする
+$("more").addEventListener("click", () => togglePanel("subpanel"));
 for (const b of document.querySelectorAll("#subpanel [data-mode]")) b.addEventListener("click", () => setMode(b.dataset.mode));
 $("paste").addEventListener("click", () => {
   closePanels();
